@@ -1,1 +1,3 @@
-**/mediamtx/**
+mediamtx/
+node_modules/
+dist/
