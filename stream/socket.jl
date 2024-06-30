@@ -16,7 +16,6 @@ end
 
 function process_message(socket::WebSocket, data::AbstractArray{UInt8})
     decoder = ProtoDecoder(IOBuffer(data))
-
     message = decode(decoder, pnp.v1.Message)
 
     if isnothing(message)
@@ -35,33 +34,39 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
         ))
 
     elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
-        deltas = [message.payload[].x, message.payload[].y]
-        println("Deltas: ", deltas)
+        payload = message.payload
 
-        while deltas[1] != 0 || deltas[2] != 0
-            step = Int16[0, 0]
+        if payload.name !== :deltas
+            println("Missing deltas!", payload)
+        else
+            deltas = [payload[].x, payload[].y]
+            println("Deltas: ", deltas)
 
-            for i in 1:2
-                if deltas[i] > 0
-                    actual_step = min(1000, deltas[i])
-                    deltas[i] -= actual_step
-                    step[i] = actual_step
-                elseif deltas[i] < 0
-                    actual_step = min(1000, -deltas[i])
-                    deltas[i] += actual_step
-                    step[i] = -actual_step
+            while deltas[1] != 0 || deltas[2] != 0
+                step = Int16[0, 0]
+
+                for i in 1:2
+                    if deltas[i] > 0
+                        actual_step = min(1000, deltas[i])
+                        deltas[i] -= actual_step
+                        step[i] = actual_step
+                    elseif deltas[i] < 0
+                        actual_step = min(1000, -deltas[i])
+                        deltas[i] += actual_step
+                        step[i] = -actual_step
+                    end
                 end
-            end
 
-            println("Stepped: ", step)
-            encode(encoder, pnp.v1.Message(
-                pnp.v1.var"Message.Tags".MOVED_DELTAS,
-                OneOf(
-                    :deltas,
-                    pnp.v1.var"Message.Deltas"(step[1], step[2])
-                )
-            ))
-            send_message(socket, encoder.io)
+                println("Stepped: ", step)
+                encode(encoder, pnp.v1.Message(
+                    pnp.v1.var"Message.Tags".MOVED_DELTAS,
+                    OneOf(
+                        :deltas,
+                        pnp.v1.var"Message.Deltas"(step[1], step[2])
+                    )
+                ))
+                send_message(socket, encoder.io)
+            end
         end
 
     end
