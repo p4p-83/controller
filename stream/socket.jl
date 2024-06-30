@@ -1,7 +1,7 @@
 using HTTP.WebSockets
 using ProtoBuf
 
-include("../client/src/proto/pnp/v1/pnp_pb.jl")
+include("../client/src/proto/pnp/v1/pnp.jl")
 
 function send_message(socket::WebSocket, data::IOBuffer)
     buffer = take!(data)
@@ -17,7 +17,7 @@ end
 function process_message(socket::WebSocket, data::AbstractArray{UInt8})
     decoder = ProtoDecoder(IOBuffer(data))
 
-    message = decode(decoder, Message)
+    message = decode(decoder, pnp.v1.Message)
 
     if isnothing(message)
         println("Received message")
@@ -28,10 +28,10 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
 
     encoder = ProtoEncoder(IOBuffer())
 
-    if message.tag == var"Message.MessageTags".HEARTBEAT
-        encode(encoder, Message(var"Message.MessageTags".HEARTBEAT, nothing))
+    if message.tag == pnp.v1.var"Message.MessageTags".HEARTBEAT
+        encode(encoder, pnp.v1.Message(pnp.v1.var"Message.MessageTags".HEARTBEAT, nothing))
 
-    elseif message.tag == var"Message.MessageTags".TARGET_DELTAS
+    elseif message.tag == pnp.v1.var"Message.MessageTags".TARGET_DELTAS
         println("Deltas: ", message.deltas)
 
         deltas = [message.deltas.x, message.deltas.y]
@@ -52,7 +52,7 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
             end
 
             println("Stepped: ", step)
-            encode(encoder, Message(var"Message.MessageTags".MOVED_DELTAS, var"Message.Deltas"(step[1], step[2])))
+            encode(encoder, pnp.v1.Message(pnp.v1.var"Message.MessageTags".MOVED_DELTAS, pnp.v1.var"Message.Deltas"(step[1], step[2])))
             send_message(socket, encoder.io)
         end
 
