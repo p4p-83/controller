@@ -28,13 +28,13 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
 
     encoder = ProtoEncoder(IOBuffer())
 
-    if message.tag == pnp.v1.var"Message.MessageTags".HEARTBEAT
+    if message.tag == pnp.v1.var"Message.Tags".HEARTBEAT
         encode(encoder, pnp.v1.Message(
-            pnp.v1.var"Message.MessageTags".HEARTBEAT,
+            pnp.v1.var"Message.Tags".HEARTBEAT,
             nothing
         ))
 
-    elseif message.tag == pnp.v1.var"Message.MessageTags".TARGET_DELTAS
+    elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
         deltas = [message.payload[].x, message.payload[].y]
         println("Deltas: ", deltas)
 
@@ -55,7 +55,7 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
 
             println("Stepped: ", step)
             encode(encoder, pnp.v1.Message(
-                pnp.v1.var"Message.MessageTags".MOVED_DELTAS,
+                pnp.v1.var"Message.Tags".MOVED_DELTAS,
                 OneOf(
                     :deltas,
                     pnp.v1.var"Message.Deltas"(step[1], step[2])
