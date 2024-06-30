@@ -29,12 +29,14 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
     encoder = ProtoEncoder(IOBuffer())
 
     if message.tag == pnp.v1.var"Message.MessageTags".HEARTBEAT
-        encode(encoder, pnp.v1.Message(pnp.v1.var"Message.MessageTags".HEARTBEAT, nothing))
+        encode(encoder, pnp.v1.Message(
+            pnp.v1.var"Message.MessageTags".HEARTBEAT,
+            nothing
+        ))
 
     elseif message.tag == pnp.v1.var"Message.MessageTags".TARGET_DELTAS
-        println("Deltas: ", message.deltas)
-
-        deltas = [message.deltas.x, message.deltas.y]
+        deltas = [message.payload[].x, message.payload[].y]
+        println("Deltas: ", deltas)
 
         while deltas[1] != 0 || deltas[2] != 0
             step = Int16[0, 0]
@@ -52,7 +54,13 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
             end
 
             println("Stepped: ", step)
-            encode(encoder, pnp.v1.Message(pnp.v1.var"Message.MessageTags".MOVED_DELTAS, pnp.v1.var"Message.Deltas"(step[1], step[2])))
+            encode(encoder, pnp.v1.Message(
+                pnp.v1.var"Message.MessageTags".MOVED_DELTAS,
+                OneOf(
+                    :deltas,
+                    pnp.v1.var"Message.Deltas"(step[1], step[2])
+                )
+            ))
             send_message(socket, encoder.io)
         end
 
