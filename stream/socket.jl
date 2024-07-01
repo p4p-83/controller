@@ -12,6 +12,34 @@ function generate_random_positions(max_length::Int=35)
     return positions
 end
 
+function step_to_centre(socket::WebSocket, encoder::ProtoEncoder, deltas)
+    while deltas[1] != 0 || deltas[2] != 0
+        step = Int16[0, 0]
+
+        for i in 1:2
+            if deltas[i] > 0
+                actual_step = min(1000, deltas[i])
+                deltas[i] -= actual_step
+                step[i] = actual_step
+            elseif deltas[i] < 0
+                actual_step = min(1000, -deltas[i])
+                deltas[i] += actual_step
+                step[i] = -actual_step
+            end
+        end
+
+        println("Stepped: ", step)
+        encode(encoder, pnp.v1.Message(
+            pnp.v1.var"Message.Tags".MOVED_DELTAS,
+            OneOf(
+                :deltas,
+                pnp.v1.var"Message.Deltas"(step[1], step[2])
+            )
+        ))
+        send_message(socket, encoder.io)
+    end
+end
+
 function send_message(socket::WebSocket, data::IOBuffer)
     buffer = take!(data)
     println("Generated message: ", buffer)
@@ -60,31 +88,27 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
         else
             deltas = [payload[].x, payload[].y]
             println("Deltas: ", deltas)
+            step_to_centre(socket, encoder, deltas)
+        end
 
-            while deltas[1] != 0 || deltas[2] != 0
-                step = Int16[0, 0]
+    elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
+        payload = message.payload
 
-                for i in 1:2
-                    if deltas[i] > 0
-                        actual_step = min(1000, deltas[i])
-                        deltas[i] -= actual_step
-                        step[i] = actual_step
-                    elseif deltas[i] < 0
-                        actual_step = min(1000, -deltas[i])
-                        deltas[i] += actual_step
-                        step[i] = -actual_step
-                    end
-                end
+        if payload.name !== :step
+            println("Missing step!", payload)
+        else
+            direction = payload[].direction
 
-                println("Stepped: ", step)
-                encode(encoder, pnp.v1.Message(
-                    pnp.v1.var"Message.Tags".MOVED_DELTAS,
-                    OneOf(
-                        :deltas,
-                        pnp.v1.var"Message.Deltas"(step[1], step[2])
-                    )
-                ))
-                send_message(socket, encoder.io)
+            if direction == pnp.v1.var"Message.Step.Direction".ZERO
+                # write(gantry, "G28\n")
+            elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_X_MIN
+                # write(gantry, "a")
+            elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_X_MAX
+                # write(gantry, "d")
+            elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_Y_MIN
+                # write(gantry, "s")
+            elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_Y_MAX
+                # write(gantry, "w")
             end
         end
 
