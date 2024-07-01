@@ -3,6 +3,15 @@ using ProtoBuf
 
 include("../client/src/proto/pnp/v1/pnp.jl")
 
+function generate_random_positions(max_length::Int=35)
+    length = rand(1:max_length)
+    positions = Vector{pnp.v1.var"Message.Position"}(undef, length)
+    for i in 1:length
+        positions[i] = pnp.v1.var"Message.Position"(rand(UInt16), rand(UInt16))
+    end
+    return positions
+end
+
 function send_message(socket::WebSocket, data::IOBuffer)
     buffer = take!(data)
     println("Generated message: ", buffer)
@@ -31,6 +40,16 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
         encode(encoder, pnp.v1.Message(
             pnp.v1.var"Message.Tags".HEARTBEAT,
             nothing
+        ))
+        send_message(socket, encoder.io)
+
+        randomPositions = generate_random_positions()
+        encode(encoder, pnp.v1.Message(
+            pnp.v1.var"Message.Tags".TARGET_POSITIONS,
+            OneOf(
+                :positions,
+                pnp.v1.var"Message.Positions"(randomPositions)
+            )
         ))
 
     elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
