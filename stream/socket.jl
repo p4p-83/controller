@@ -143,18 +143,6 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
             if direction == pnp.v1.var"Message.Step.Direction".ZERO
                 write(gantry.port, "G28\n")
                 gantry.position = Position(0, 0, 0)
-            elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_X_MIN
-                write(gantry.port, "a")
-                gantry.position += Position(-5000, 0, 0)
-            elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_X_MAX
-                write(gantry.port, "d")
-                gantry.position += Position(5000, 0, 0)
-            elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_Y_MIN
-                write(gantry.port, "s")
-                gantry.position += Position(0, -5000, 0)
-            elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_Y_MAX
-                write(gantry.port, "w")
-                gantry.position += Position(0, 5000, 0)
             end
 
             println("Moved gantry to $(gantry.position)")
