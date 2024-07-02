@@ -1,7 +1,27 @@
 using HTTP.WebSockets
 using ProtoBuf
+using LibSerialPort
 
 include("../client/src/proto/pnp/v1/pnp.jl")
+
+##
+
+mutable struct Position
+    x::Int32
+    y::Int32
+    z::Int32
+end
+
+mutable struct Gantry
+    port::SerialPort
+    position::Position
+end
+
+function Base.:+(a::Position, b::Position)
+    return Position(a.x + b.x, a.y + b.y, a.z + b.z)
+end
+
+##
 
 function generate_random_positions(max_length::Int=35)
     length = rand(1:max_length)
@@ -11,6 +31,8 @@ function generate_random_positions(max_length::Int=35)
     end
     return positions
 end
+
+##
 
 function step_to_centre(socket::WebSocket, encoder::ProtoEncoder, deltas)
     while deltas[1] != 0 || deltas[2] != 0
@@ -40,18 +62,22 @@ function step_to_centre(socket::WebSocket, encoder::ProtoEncoder, deltas)
     end
 end
 
+##
+
 function send_message(socket::WebSocket, data::IOBuffer)
     buffer = take!(data)
     println("Generated message: ", buffer)
     WebSockets.send(socket, buffer)
 end
 
-function process_message(socket::WebSocket, data::Any)
+##
+
+function process_message(socket::WebSocket, data::Any, gantry::Gantry)
     println("Non-UInt8[] data received: ", data)
     return nothing
 end
 
-function process_message(socket::WebSocket, data::AbstractArray{UInt8})
+function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::Gantry)
     decoder = ProtoDecoder(IOBuffer(data))
     message = decode(decoder, pnp.v1.Message)
 
@@ -86,9 +112,22 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
         if payload.name !== :deltas
             println("Missing deltas!", payload)
         else
-            deltas = [payload[].x, payload[].y]
-            println("Deltas: ", deltas)
-            step_to_centre(socket, encoder, deltas)
+            println("Deltas: ", payload[])
+
+            println("Gantry currently at $(gantry.position)")
+
+            gantry.position += Position(trunc(Int, payload[].y * 1.6), trunc(Int, payload[].x * 2.8), 0)
+            if gantry.position.x < 0
+                gantry.position.x = 0
+            end
+            if gantry.position.y < 0
+                gantry.position.y = 0
+            end
+
+            write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
+            println("Moved gantry to $(gantry.position)")
+
+            step_to_centre(socket, encoder, [payload[].x, payload[].y])
         end
 
     elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
@@ -99,17 +138,27 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
         else
             direction = payload[].direction
 
+            println("Gantry currently at $(gantry.position)")
+
             if direction == pnp.v1.var"Message.Step.Direction".ZERO
-                # write(gantry, "G28\n")
+                write(gantry.port, "G28\n")
+                gantry.position = Position(0, 0, 0)
             elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_X_MIN
-                # write(gantry, "a")
+                write(gantry.port, "a")
+                gantry.position += Position(-5000, 0, 0)
             elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_X_MAX
-                # write(gantry, "d")
+                write(gantry.port, "d")
+                gantry.position += Position(5000, 0, 0)
             elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_Y_MIN
-                # write(gantry, "s")
+                write(gantry.port, "s")
+                gantry.position += Position(0, -5000, 0)
             elseif direction == pnp.v1.var"Message.Step.Direction".TOWARDS_Y_MAX
-                # write(gantry, "w")
+                write(gantry.port, "w")
+                gantry.position += Position(0, 5000, 0)
             end
+
+            println("Moved gantry to $(gantry.position)")
+
         end
 
     end
@@ -120,6 +169,17 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8})
 
 end
 
+##
+
+gantry = Gantry(
+    open("/dev/ttyUSB0", 115200),
+    Position(0, 0, 0)
+)
+
+write(gantry.port, "G28\n")
+
+##
+
 WebSockets.listen("0.0.0.0", 8080) do socket
     println("Client connected")
 
@@ -127,7 +187,11 @@ WebSockets.listen("0.0.0.0", 8080) do socket
         println()
         println("Received data: ", data)
 
-        process_message(socket, data)
+        process_message(socket, data, gantry)
     end
 
 end
+
+##
+
+close(gantry.port)
