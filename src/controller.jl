@@ -18,9 +18,9 @@ mutable struct Gantry
 end
 
 mutable struct Calibration
-    x::Float16
-    y::Float16
-    z::Float16
+    x::Float32
+    y::Float32
+    z::Float32
 end
 
 function Base.:+(a::Position, b::Position)
@@ -87,7 +87,12 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
     decoder = ProtoDecoder(IOBuffer(data))
     message = decode(decoder, pnp.v1.Message)
 
-    let calibration = Calibration(131072, 131072, 0)
+    # Assume that you can see 8x 10mm squares on the video feed.
+    # This means that [0, 65536] maps into [0mm, 80mm].
+    # Therefore, to denormalise into millimetres, we must multiply received deltas by (80 mm / 65536).
+    # To normalise into micrometres, we multiply this factor by (1000 um / 1 mm).
+    # Therefore, a reasonable starting calibration is (80000 um / 65536).
+    let calibration = Calibration((80000 / 65536), (80000 / 65536), 0)
 
         if isnothing(message)
             println("Received message")
@@ -123,6 +128,7 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
                 println("Deltas: ", payload[])
 
                 println("Gantry currently at $(gantry.position)")
+                println("Calibration is currently $(calibration)")
 
                 gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
                 if gantry.position.x < 0
