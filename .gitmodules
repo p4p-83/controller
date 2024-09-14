@@ -1,3 +1,6 @@
 [submodule "src/proto"]
 	path = src/proto
 	url = https://github.com/p4p-83/protobufs.git
+[submodule "src/vision"]
+	path = src/vision
+	url = https://github.com/p4p-83/vision.git
