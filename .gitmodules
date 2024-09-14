@@ -1,3 +1,3 @@
-[submodule "client/src/proto"]
-	path = client/src/proto
+[submodule "src/proto"]
+	path = src/proto
 	url = https://github.com/p4p-83/protobufs
