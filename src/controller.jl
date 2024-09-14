@@ -86,98 +86,100 @@ end
 function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::Gantry)
     decoder = ProtoDecoder(IOBuffer(data))
     message = decode(decoder, pnp.v1.Message)
-    
+
     let calibration = Calibration(131072, 131072, 0)
-    
-    if isnothing(message)
-        println("Received message")
-        return nothing
-    else
-        println("Received message: ", message)
-    end
 
-    encoder = ProtoEncoder(IOBuffer())
-
-    if message.tag == pnp.v1.var"Message.Tags".HEARTBEAT
-        encode(encoder, pnp.v1.Message(
-            pnp.v1.var"Message.Tags".HEARTBEAT,
-            nothing
-        ))
-        send_message(socket, encoder.io)
-
-        randomPositions = generate_random_positions()
-        encode(encoder, pnp.v1.Message(
-            pnp.v1.var"Message.Tags".TARGET_POSITIONS,
-            OneOf(
-                :positions,
-                pnp.v1.var"Message.Positions"(randomPositions)
-            )
-        ))
-
-    elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
-        payload = message.payload
-
-        if payload.name !== :deltas
-            println("Missing deltas!", payload)
+        if isnothing(message)
+            println("Received message")
+            return nothing
         else
-            println("Deltas: ", payload[])
-
-            println("Gantry currently at $(gantry.position)")
-
-            gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
-            if gantry.position.x < 0
-                gantry.position.x = 0
-            end
-            if gantry.position.y < 0
-                gantry.position.y = 0
-            end
-
-            write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
-            println("Moved gantry to $(gantry.position)")
-
-            step_to_centre(socket, encoder, [payload[].x, payload[].y])
-        end
-        
-    elseif message.tag == pnp.v1.var"Message.Tags".CALIBRATE_DELTAS
-        payload = message.payload
-
-        if payload.name !== :calibration
-            println("Missing calibration!", payload)
-        else
-            println("Target deltas: ", payload[].target)
-            println("Real deltas: ", payload[].real)
-
-            println("Current calibration is $(calibration)")
-
-            calibration.x = calibration.x / (1 - (payload[].real.x / payload[].target.x))
-            calibration.y = calibration.y / (1 - (payload[].real.y / payload[].target.y))
-
-            println("Calibrated to $(calibration)")
+            println("Received message: ", message)
         end
 
-    elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
-        payload = message.payload
+        encoder = ProtoEncoder(IOBuffer())
 
-        if payload.name !== :step
-            println("Missing step!", payload)
-        else
-            direction = payload[].direction
+        if message.tag == pnp.v1.var"Message.Tags".HEARTBEAT
+            encode(encoder, pnp.v1.Message(
+                pnp.v1.var"Message.Tags".HEARTBEAT,
+                nothing
+            ))
+            send_message(socket, encoder.io)
 
-            println("Gantry currently at $(gantry.position)")
+            randomPositions = generate_random_positions()
+            encode(encoder, pnp.v1.Message(
+                pnp.v1.var"Message.Tags".TARGET_POSITIONS,
+                OneOf(
+                    :positions,
+                    pnp.v1.var"Message.Positions"(randomPositions)
+                )
+            ))
 
-            if direction == pnp.v1.var"Message.Step.Direction".ZERO
-                write(gantry.port, "G28\n")
-                gantry.position = Position(0, 0, 0)
+        elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
+            payload = message.payload
+
+            if payload.name !== :deltas
+                println("Missing deltas!", payload)
+            else
+                println("Deltas: ", payload[])
+
+                println("Gantry currently at $(gantry.position)")
+
+                gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
+                if gantry.position.x < 0
+                    gantry.position.x = 0
+                end
+                if gantry.position.y < 0
+                    gantry.position.y = 0
+                end
+
+                write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
+                println("Moved gantry to $(gantry.position)")
+
+                step_to_centre(socket, encoder, [payload[].x, payload[].y])
             end
 
-            println("Moved gantry to $(gantry.position)")
+        elseif message.tag == pnp.v1.var"Message.Tags".CALIBRATE_DELTAS
+            payload = message.payload
+
+            if payload.name !== :calibration
+                println("Missing calibration!", payload)
+            else
+                println("Target deltas: ", payload[].target)
+                println("Real deltas: ", payload[].real)
+
+                println("Current calibration is $(calibration)")
+
+                calibration.x = calibration.x / (1 - (payload[].real.x / payload[].target.x))
+                calibration.y = calibration.y / (1 - (payload[].real.y / payload[].target.y))
+
+                println("Calibrated to $(calibration)")
+            end
+
+        elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
+            payload = message.payload
+
+            if payload.name !== :step
+                println("Missing step!", payload)
+            else
+                direction = payload[].direction
+
+                println("Gantry currently at $(gantry.position)")
+
+                if direction == pnp.v1.var"Message.Step.Direction".ZERO
+                    write(gantry.port, "G28\n")
+                    gantry.position = Position(0, 0, 0)
+                end
+
+                println("Moved gantry to $(gantry.position)")
+
+            end
 
         end
 
-    end
+        if position(encoder.io) != 0
+            send_message(socket, encoder.io)
+        end
 
-    if position(encoder.io) != 0
-        send_message(socket, encoder.io)
     end
 
 end
