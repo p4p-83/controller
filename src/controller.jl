@@ -149,8 +149,8 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
 
             println("Current calibration is $(calibration)")
 
-            calibration.x = calibration.x * (1 - (payload[].real.x / payload[].target.x))
-            calibration.y = calibration.y * (1 - (payload[].real.y / payload[].target.y))
+            calibration.x = calibration.x / (1 - (payload[].real.x / payload[].target.x))
+            calibration.y = calibration.y / (1 - (payload[].real.y / payload[].target.y))
 
             println("Calibrated to $(calibration)")
         end
