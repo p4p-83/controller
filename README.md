@@ -11,7 +11,7 @@ Firstly, clone this repository. Set up [SSH Agent Forwarding](https://docs.githu
 
 ```sh
 git submodule update --init
-julia controller.jl
+julia src/controller.jl
 ```
 
 ## Interfaces
