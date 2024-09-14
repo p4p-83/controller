@@ -2,7 +2,7 @@ using HTTP.WebSockets
 using ProtoBuf
 using LibSerialPort
 
-include("../client/src/proto/pnp/v1/pnp.jl")
+include("proto/pnp/v1/pnp.jl")
 
 ##
 
