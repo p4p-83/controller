@@ -17,6 +17,12 @@ mutable struct Gantry
     position::Position
 end
 
+mutable struct Calibration
+    x::Float16
+    y::Float16
+    z::Float16
+end
+
 function Base.:+(a::Position, b::Position)
     return Position(a.x + b.x, a.y + b.y, a.z + b.z)
 end
@@ -80,7 +86,9 @@ end
 function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::Gantry)
     decoder = ProtoDecoder(IOBuffer(data))
     message = decode(decoder, pnp.v1.Message)
-
+    
+    let calibration = Calibration(131072, 131072, 0)
+    
     if isnothing(message)
         println("Received message")
         return nothing
@@ -116,7 +124,7 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
 
             println("Gantry currently at $(gantry.position)")
 
-            gantry.position += Position(trunc(Int, payload[].y * 1.6), trunc(Int, payload[].x * 2.8), 0)
+            gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
             if gantry.position.x < 0
                 gantry.position.x = 0
             end
@@ -128,6 +136,23 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
             println("Moved gantry to $(gantry.position)")
 
             step_to_centre(socket, encoder, [payload[].x, payload[].y])
+        end
+        
+    elseif message.tag == pnp.v1.var"Message.Tags".CALIBRATE_DELTAS
+        payload = message.payload
+
+        if payload.name !== :calibration
+            println("Missing calibration!", payload)
+        else
+            println("Target deltas: ", payload[].target)
+            println("Real deltas: ", payload[].real)
+
+            println("Current calibration is $(calibration)")
+
+            calibration.x = calibration.x * (1 - (payload[].real.x / payload[].target.x))
+            calibration.y = calibration.y * (1 - (payload[].real.y / payload[].target.y))
+
+            println("Calibrated to $(calibration)")
         end
 
     elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
