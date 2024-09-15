@@ -83,109 +83,107 @@ function process_message(socket::WebSocket, data::Any, gantry::Gantry)
     return nothing
 end
 
+# Assume that you can see 8x 10mm squares on the video feed.
+# This means that [0, 65536] maps into [0mm, 80mm].
+# Therefore, to denormalise into millimetres, we must multiply received deltas by (80 mm / 65536).
+# To normalise into micrometres, we multiply this factor by (1000 um / 1 mm).
+# Therefore, a reasonable starting calibration is (80000 um / 65536).
+calibration = Calibration((80000 / 65536), (80000 / 65536), 0)
+
 function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::Gantry)
     decoder = ProtoDecoder(IOBuffer(data))
     message = decode(decoder, pnp.v1.Message)
 
-    # Assume that you can see 8x 10mm squares on the video feed.
-    # This means that [0, 65536] maps into [0mm, 80mm].
-    # Therefore, to denormalise into millimetres, we must multiply received deltas by (80 mm / 65536).
-    # To normalise into micrometres, we multiply this factor by (1000 um / 1 mm).
-    # Therefore, a reasonable starting calibration is (80000 um / 65536).
-    let calibration = Calibration((80000 / 65536), (80000 / 65536), 0)
+    if isnothing(message)
+        println("Received message")
+        return nothing
+    else
+        println("Received message: ", message)
+    end
 
-        if isnothing(message)
-            println("Received message")
-            return nothing
+    encoder = ProtoEncoder(IOBuffer())
+
+    if message.tag == pnp.v1.var"Message.Tags".HEARTBEAT
+        encode(encoder, pnp.v1.Message(
+            pnp.v1.var"Message.Tags".HEARTBEAT,
+            nothing
+        ))
+        send_message(socket, encoder.io)
+
+        randomPositions = generate_random_positions()
+        encode(encoder, pnp.v1.Message(
+            pnp.v1.var"Message.Tags".TARGET_POSITIONS,
+            OneOf(
+                :positions,
+                pnp.v1.var"Message.Positions"(randomPositions)
+            )
+        ))
+
+    elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
+        payload = message.payload
+
+        if payload.name !== :deltas
+            println("Missing deltas!", payload)
         else
-            println("Received message: ", message)
+            println("Deltas: ", payload[])
+
+            println("Gantry currently at $(gantry.position)")
+            println("Calibration is currently $(calibration)")
+
+            gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
+            if gantry.position.x < 0
+                gantry.position.x = 0
+            end
+            if gantry.position.y < 0
+                gantry.position.y = 0
+            end
+
+            write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
+            println("Moved gantry to $(gantry.position)")
+
+            step_to_centre(socket, encoder, [payload[].x, payload[].y])
         end
 
-        encoder = ProtoEncoder(IOBuffer())
+    elseif message.tag == pnp.v1.var"Message.Tags".CALIBRATE_DELTAS
+        payload = message.payload
 
-        if message.tag == pnp.v1.var"Message.Tags".HEARTBEAT
-            encode(encoder, pnp.v1.Message(
-                pnp.v1.var"Message.Tags".HEARTBEAT,
-                nothing
-            ))
-            send_message(socket, encoder.io)
+        if payload.name !== :calibration
+            println("Missing calibration!", payload)
+        else
+            println("Target deltas: ", payload[].target)
+            println("Real deltas: ", payload[].real)
 
-            randomPositions = generate_random_positions()
-            encode(encoder, pnp.v1.Message(
-                pnp.v1.var"Message.Tags".TARGET_POSITIONS,
-                OneOf(
-                    :positions,
-                    pnp.v1.var"Message.Positions"(randomPositions)
-                )
-            ))
+            println("Current calibration is $(calibration)")
 
-        elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
-            payload = message.payload
+            calibration.x = calibration.x / (1 - (payload[].real.x / payload[].target.x))
+            calibration.y = calibration.y / (1 - (payload[].real.y / payload[].target.y))
 
-            if payload.name !== :deltas
-                println("Missing deltas!", payload)
-            else
-                println("Deltas: ", payload[])
+            println("Calibrated to $(calibration)")
+        end
 
-                println("Gantry currently at $(gantry.position)")
-                println("Calibration is currently $(calibration)")
+    elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
+        payload = message.payload
 
-                gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
-                if gantry.position.x < 0
-                    gantry.position.x = 0
-                end
-                if gantry.position.y < 0
-                    gantry.position.y = 0
-                end
+        if payload.name !== :step
+            println("Missing step!", payload)
+        else
+            direction = payload[].direction
 
-                write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
-                println("Moved gantry to $(gantry.position)")
+            println("Gantry currently at $(gantry.position)")
 
-                step_to_centre(socket, encoder, [payload[].x, payload[].y])
+            if direction == pnp.v1.var"Message.Step.Direction".ZERO
+                write(gantry.port, "G28\n")
+                gantry.position = Position(0, 0, 0)
             end
 
-        elseif message.tag == pnp.v1.var"Message.Tags".CALIBRATE_DELTAS
-            payload = message.payload
-
-            if payload.name !== :calibration
-                println("Missing calibration!", payload)
-            else
-                println("Target deltas: ", payload[].target)
-                println("Real deltas: ", payload[].real)
-
-                println("Current calibration is $(calibration)")
-
-                calibration.x = calibration.x / (1 - (payload[].real.x / payload[].target.x))
-                calibration.y = calibration.y / (1 - (payload[].real.y / payload[].target.y))
-
-                println("Calibrated to $(calibration)")
-            end
-
-        elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
-            payload = message.payload
-
-            if payload.name !== :step
-                println("Missing step!", payload)
-            else
-                direction = payload[].direction
-
-                println("Gantry currently at $(gantry.position)")
-
-                if direction == pnp.v1.var"Message.Step.Direction".ZERO
-                    write(gantry.port, "G28\n")
-                    gantry.position = Position(0, 0, 0)
-                end
-
-                println("Moved gantry to $(gantry.position)")
-
-            end
+            println("Moved gantry to $(gantry.position)")
 
         end
 
-        if position(encoder.io) != 0
-            send_message(socket, encoder.io)
-        end
+    end
 
+    if position(encoder.io) != 0
+        send_message(socket, encoder.io)
     end
 
 end
