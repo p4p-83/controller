@@ -1,12 +1,12 @@
-using Test#, BenchmarkTools
+using Random, Test#, BenchmarkTools
 
-include("./Algorithms.jl")
-import .Algorithms
+include("../structs.jl")
+include("algorithms.jl")
 
 j = im
 deg = 2π/360	# multiplicative degrees to radians conversion factor
 
-@testset "Algorithms.findRotation dummy resistor 30°" begin
+@testset "findRotation dummy resistor 30°" begin
 	rotationalMisalignment = 30deg
 	
 	leads = [
@@ -16,28 +16,28 @@ deg = 2π/360	# multiplicative degrees to radians conversion factor
 
 	pads = copy(leads) .* cis(rotationalMisalignment)
 	
-	correction = Algorithms.findRotation(leads, pads)[1]
+	correction = findRotation(leads, pads)[1]
 	rotationalCorrection = correction.rotation
 	
 	@test isapprox(rotationalCorrection, 360deg-rotationalMisalignment, atol=2deg)
 	
 	pads .+= 0.2 + 0.1j
-	rotationalCorrection = Algorithms.findRotation(leads, pads)[1].rotation
+	rotationalCorrection = findRotation(leads, pads)[1].rotation
 	@test isapprox(rotationalCorrection, 360deg-rotationalMisalignment, atol=2deg)
 	
 	pads .-= 0.3 - 0.1j
-	rotationalCorrection = Algorithms.findRotation(leads, pads)[1].rotation
+	rotationalCorrection = findRotation(leads, pads)[1].rotation
 	@test isapprox(rotationalCorrection, 360deg-rotationalMisalignment, atol=2deg) broken=true
 
 	pads = 1.2copy(leads) .* cis(rotationalMisalignment)
-	rotationalCorrection = Algorithms.findRotation(leads, pads)[1].rotation
+	rotationalCorrection = findRotation(leads, pads)[1].rotation
 	@test isapprox(rotationalCorrection, 360deg-rotationalMisalignment, atol=2deg)
 
 end;
 
 # do not edit directly
 # copy/pasted from above 30° set
-@testset "Algorithms.findRotation dummy resistor 213°" begin
+@testset "findRotation dummy resistor 213°" begin
 	rotationalMisalignment = 213deg
 	
 	leads = [
@@ -47,29 +47,29 @@ end;
 
 	pads = copy(leads) .* cis(rotationalMisalignment)
 	
-	correction = Algorithms.findRotation(leads, pads)[1]
+	correction = findRotation(leads, pads)[1]
 	rotationalCorrection = correction.rotation
 	
 	@test isapprox(rotationalCorrection, 360deg-rotationalMisalignment, atol=2deg)
 	
 	pads .+= 0.2 + 0.1j
-	rotationalCorrection = Algorithms.findRotation(leads, pads)[1].rotation
+	rotationalCorrection = findRotation(leads, pads)[1].rotation
 	@test isapprox(rotationalCorrection, 360deg-rotationalMisalignment, atol=2deg)
 	
 	pads .-= 0.3 - 0.1j
-	rotationalCorrection = Algorithms.findRotation(leads, pads)[1].rotation
+	rotationalCorrection = findRotation(leads, pads)[1].rotation
 	@test isapprox(rotationalCorrection, 360deg-rotationalMisalignment, atol=2deg) broken=true
 
 	pads = 1.2copy(leads) .* cis(rotationalMisalignment)
-	rotationalCorrection = Algorithms.findRotation(leads, pads)[1].rotation
+	rotationalCorrection = findRotation(leads, pads)[1].rotation
 	@test isapprox(rotationalCorrection, 360deg-rotationalMisalignment, atol=2deg)
 
 	# benchmark, 'cause I'm interested
-	#display(@benchmark Algorithms.findRotation(leads, pads))
+	# display(@benchmark findRotation(leads, pads))
 
 end;
 
-@testset "Algorithms.wick dummy SOIC8" begin
+@testset "wick dummy SOIC8" begin
 	
 	# demo components to ease test board construction
 	res::Vector{ComplexF64} = [0, 2]
@@ -97,7 +97,7 @@ end;
 	leads .*= cis(-rotationOffset) # component won't be in alignment yet
 	
 	# analyse it
-	move = Algorithms.wick(leads, pads)
+	move = wick(leads, pads)
 	# println(move)
 	
 	# compare with expectations
@@ -107,11 +107,11 @@ end;
 	@test isapprox(move.rotation, expectedCorrectiveRotation, atol=0.01deg)
 	
 	# benchmark, 'cause I'm interested
-	#display(@benchmark Algorithms.wick(leads, pads))
+	# display(@benchmark wick(leads, pads))
 
 end;
 
-@testset "Algorithms.wick dummy SOIC8 with scale issue" begin
+@testset "wick dummy SOIC8 with scale issue" begin
 	
 	# demo components to ease test board construction
 	res::Vector{ComplexF64} = [0, 2]
@@ -140,7 +140,7 @@ end;
 	leads .*= cis(-rotationOffset) # component won't be in alignment yet
 	
 	# analyse it
-	move = Algorithms.wick(leads, pads, plotting=false)
+	move = wick(leads, pads, plotting=false)
 	# println(move)
 	
 	# compare with expectations

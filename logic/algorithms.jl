@@ -1,6 +1,9 @@
 # CV Algorithms
 # These turn centroids into machine moves
 
+using Statistics # for `mean()`
+const °::Float64 = 2π/360	# multiplicative degrees to radians conversion factor
+
 function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, selectivity=5, plotting=false)
 	# leads is a list of the lead centroids
 	# pads is a list of the pad centroids
@@ -49,7 +52,7 @@ function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, select
 
 	# if the desired centre of rotation isn't the actual centre of rotation of the nozzle, it will move
 	# calculate the required translation to "catch" it
-	correctiveTranslation = @. centreOfRotation*(1-cis(rankedAngles))
+	correctiveTranslation = @. reference*(1-cis(rankedAngles))
 
 	return MachineMovement.(correctiveTranslation, rankedAngles)[1:5]
 
