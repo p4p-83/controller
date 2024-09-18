@@ -1,6 +1,6 @@
 using Random, Test#, BenchmarkTools
 
-include("../structs.jl")
+include("../common.jl")
 include("algorithms.jl")
 
 j = im

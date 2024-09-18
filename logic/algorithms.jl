@@ -2,7 +2,6 @@
 # These turn centroids into machine moves
 
 using Statistics # for `mean()`
-const °::Float64 = 2π/360	# multiplicative degrees to radians conversion factor
 
 function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, selectivity=5, plotting=false)
 	# leads is a list of the lead centroids
