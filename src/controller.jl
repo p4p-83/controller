@@ -68,7 +68,7 @@ end
 # end
 
 function getSnapMarkerPositions(maxLength::Int=35)
-	padCoordsList = Vision.getCentroidsNorm(1)[1:maxLength]
+	padCoordsList = Vision.getCentroidsNorm(1)[1:min(end, maxLength)]
 	positions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in padCoordsList]
 	return positions
 end
