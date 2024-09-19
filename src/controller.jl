@@ -67,7 +67,7 @@ end
 #     return positions
 # end
 
-function getSnapMarkerPositions(maxLength::Int=35)
+function getSnapMarkerPositions(maxLength::Int=250)
 	padCoordsList = Vision.getCentroidsNorm(1)[1:min(end, maxLength)]
 	positions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in padCoordsList]
 	return positions
@@ -225,43 +225,35 @@ headIo::Union{Nothing, LibSerialPort.SerialPort} = nothing
 function headSequence()
 	global headIo
 
-	pushNozzleOut() = write(headIo, "G1 Y-1.7 F600\r")
-	pullNozzleIn() = write(headIo, "G1 Y1.7 F600\r")
+	pushNozzleOut() = write(headIo, "G1 Y-1.85 F600\r")
+	pullNozzleIn() = write(headIo, "G1 Y1.85 F600\r")
 	# must move nozzle axis in tandem as it is coupled to the head axis
 	rotateHeadDown(distance) = write(headIo, "G1 Y-$(distance*gearRatio) X-$distance F2000\r")
 	rotateHeadUp(distance) = write(headIo, "G1 Y$(distance*gearRatio) X$distance F2000\r")
 	
 	function dispatchSequence()
 		# all gets sent at once and queued by the head
-		pullNozzleIn()
-
+		
 		rotateHeadDown(5.5)
 		pushNozzleOut()
 		pullNozzleIn()
 		
 		rotateHeadUp(5.5)
-		setFreezeFramed(false)
 		pushNozzleOut()
-	end
+		pullNozzleIn()
 
-	# approximately match the timings with some freeze-frames
-	totalDuration = 6.60
+	end
+	
+	setFreezeFramed(true)
 
 	# send all of the commands in advance
-	# TODO probably does not need a new thread…
-	Threads.@spawn dispatchSequence()
-	
-	sleep1 = 0.5
-	sleep(sleep1)
+	dispatchSequence()
 
-	setFreezeFramed(true)
-	
-	sleep2 = 5
-	sleep(sleep2)
+	sleep(5)
 
 	setFreezeFramed(false)
 	
-    sleep(totalDuration-sleep1-sleep2)
+    sleep(2)
 
 end
 
