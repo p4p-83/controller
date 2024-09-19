@@ -199,6 +199,47 @@ write(gantry.port, "G28\n")
 
 ##
 
+using LibSerialPort
+
+head = open("/dev/tty.usbmodem101", 115200)
+
+##
+
+function setupHead()
+    # Put into relative coordinates
+    write(head, "G91\r")
+end
+
+gearRatio = 11 / 69.8
+
+# Must move nozzle axis as it is coupled to the head axis
+rotateHeadDown(distance) = write(head, "G1 Y-$(distance*gearRatio) X-$distance F2000\r")
+rotateHeadUp(distance) = write(head, "G1 Y$(distance*gearRatio) X$distance F2000\r")
+pullNozzleIn() = write(head, "G1 Y-1.7 F600\r")
+pushNozzleOut() = write(head, "G1 Y1.7 F600\r")
+
+##
+
+setupHead()
+
+while true
+    rotateHeadDown(5.5)
+    pullNozzleIn()
+    pushNozzleOut()
+
+    rotateHeadUp(5.5)
+    pullNozzleIn()
+    pushNozzleOut()
+
+    sleep(5)
+end
+
+##
+
+close(head)
+
+##
+
 WebSockets.listen("0.0.0.0", 8080) do socket
     println("Client connected")
 
