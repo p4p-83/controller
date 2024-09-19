@@ -1,10 +1,14 @@
-using HTTP.WebSockets
-using ProtoBuf
-using LibSerialPort
+module Controller
+
+using HTTP.WebSockets, ProtoBuf, LibSerialPort
+using Crayons.Box
 
 include("proto/pnp/v1/pnp.jl")
 
-##
+include("vision/vision.jl")
+using .Vision
+
+const gearRatio::Float64 = 11 / 69.8
 
 mutable struct Position
     x::Int32
@@ -23,22 +27,51 @@ mutable struct Calibration
     z::Float32
 end
 
+function usageNotes()
+println("""
+
+╒═══════════════════════════════════════════════════════════════════════════╕
+│ starting $(" controller.jl " |> YELLOW_BG |> WHITE_FG)                                                  │
+│                                                                           │
+│ This is the master file for the physical pick and place machine.          │
+│                                                                           │
+│ Note that this application is multithreaded, and you currently have       │
+│ $("$(n=Threads.nthreads()) thread$(n==1 ? "" : "s")"|>BOLD|>YELLOW_FG) allocated to Julia. Julia can handle the task switching within   │
+│ the threads allocated to it and thus function with virtually any number   │
+│ of OS threads (as I understand it), but for the best possible performance │
+│ you should probably ensure that this number of OS-allocated threads is    │
+│ sensible. You can change this with $("export JULIA_NUM_THREADS=2" |> ITALICS) from        │
+│ the shell.                                                                │
+│                                                                           │
+│ You can also run this code from the REPL, but there are unlikely to be    │
+│ any net benefits to gain from doing this (you'll have to pay particular   │
+│ attention to closing all opened resources. However, if you do choose to   │
+│ use the REPL, it will adopt the number of threads $("export"|>ITALICS)ed, or if         │
+│ connected to VS Code will follow the $("\"julia.NumThreads\": 2" |> ITALICS) setting        │
+│ in the host machine's VS Code settings.json.                              │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+""")
+end
+
 function Base.:+(a::Position, b::Position)
     return Position(a.x + b.x, a.y + b.y, a.z + b.z)
 end
 
-##
+# function generate_random_positions(max_length::Int=35)
+#     length = rand(1:max_length)
+#     positions = Vector{pnp.v1.var"Message.Position"}(undef, length)
+#     for i in 1:length
+#         positions[i] = pnp.v1.var"Message.Position"(rand(UInt16), rand(UInt16))
+#     end
+#     return positions
+# end
 
-function generate_random_positions(max_length::Int=35)
-    length = rand(1:max_length)
-    positions = Vector{pnp.v1.var"Message.Position"}(undef, length)
-    for i in 1:length
-        positions[i] = pnp.v1.var"Message.Position"(rand(UInt16), rand(UInt16))
-    end
-    return positions
+function getSnapMarkerPositions(maxLength::Int=35)
+	padCoordsList = Vision.getCentroidsNorm(1)[1:maxLength]
+	positions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in padCoordsList]
+	return positions
 end
-
-##
 
 function step_to_centre(socket::WebSocket, encoder::ProtoEncoder, deltas)
     while deltas[1] != 0 || deltas[2] != 0
@@ -68,15 +101,11 @@ function step_to_centre(socket::WebSocket, encoder::ProtoEncoder, deltas)
     end
 end
 
-##
-
 function send_message(socket::WebSocket, data::IOBuffer)
     buffer = take!(data)
     println("Generated message: ", buffer)
     WebSockets.send(socket, buffer)
 end
-
-##
 
 function process_message(socket::WebSocket, data::Any, gantry::Gantry)
     println("Non-UInt8[] data received: ", data)
@@ -110,12 +139,14 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
         ))
         send_message(socket, encoder.io)
 
-        randomPositions = generate_random_positions()
+		# randomPositions = generate_random_positions()
+		snapPositions = getSnapMarkerPositions()
         encode(encoder, pnp.v1.Message(
             pnp.v1.var"Message.Tags".TARGET_POSITIONS,
             OneOf(
                 :positions,
-                pnp.v1.var"Message.Positions"(randomPositions)
+                # pnp.v1.var"Message.Positions"(randomPositions)
+                pnp.v1.var"Message.Positions"(snapPositions)
             )
         ))
 
@@ -188,70 +219,97 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
 
 end
 
-##
+gantry::Union{Nothing, Gantry} = nothing
+headIo::Union{Nothing, LibSerialPort.SerialPort} = nothing
 
-gantry = Gantry(
-    open("/dev/ttyUSB0", 115200),
-    Position(0, 0, 0)
-)
+function headSequence()
+	global headIo
 
-write(gantry.port, "G28\n")
+	pushNozzleOut() = write(headIo, "G1 Y-1.7 F600\r")
+	pullNozzleIn() = write(headIo, "G1 Y1.7 F600\r")
+	# must move nozzle axis in tandem as it is coupled to the head axis
+	rotateHeadDown(distance) = write(headIo, "G1 Y-$(distance*gearRatio) X-$distance F2000\r")
+	rotateHeadUp(distance) = write(headIo, "G1 Y$(distance*gearRatio) X$distance F2000\r")
+	
+	function dispatchSequence()
+		# all gets sent at once and queued by the head
+		pullNozzleIn()
 
-##
+		rotateHeadDown(5.5)
+		pushNozzleOut()
+		pullNozzleIn()
+		
+		rotateHeadUp(5.5)
+		setFreezeFramed(false)
+		pushNozzleOut()
+	end
 
-using LibSerialPort
+	# approximately match the timings with some freeze-frames
+	totalDuration = 6.60
 
-head = open("/dev/tty.usbmodem101", 115200)
+	# send all of the commands in advance
+	# TODO probably does not need a new thread…
+	Threads.@spawn dispatchSequence()
+	
+	sleep1 = 0.5
+	sleep(sleep1)
 
-##
+	setFreezeFramed(true)
+	
+	sleep2 = 5
+	sleep(sleep2)
 
-function setupHead()
-    # Put into relative coordinates
-    write(head, "G91\r")
-end
-
-gearRatio = 11 / 69.8
-
-# Must move nozzle axis as it is coupled to the head axis
-rotateHeadDown(distance) = write(head, "G1 Y-$(distance*gearRatio) X-$distance F2000\r")
-rotateHeadUp(distance) = write(head, "G1 Y$(distance*gearRatio) X$distance F2000\r")
-pullNozzleIn() = write(head, "G1 Y-1.7 F600\r")
-pushNozzleOut() = write(head, "G1 Y1.7 F600\r")
-
-##
-
-setupHead()
-
-while true
-    rotateHeadDown(5.5)
-    pullNozzleIn()
-    pushNozzleOut()
-
-    rotateHeadUp(5.5)
-    pullNozzleIn()
-    pushNozzleOut()
-
-    sleep(5)
-end
-
-##
-
-close(head)
-
-##
-
-WebSockets.listen("0.0.0.0", 8080) do socket
-    println("Client connected")
-
-    for data in socket
-        println()
-        println("Received data: ", data)
-
-        process_message(socket, data, gantry)
-    end
+	setFreezeFramed(false)
+	
+    sleep(totalDuration-sleep1-sleep2)
 
 end
 
-##
+function headSequenceOnRepeat()
+	while true
+		headSequence()
+	end
+end
 
-close(gantry.port)
+function openAndHandleWebsocket()
+	WebSockets.listen("0.0.0.0", 8080) do socket
+		println("Client connected")
+	
+		for data in socket
+			println()
+			println("Received data: ", data)
+	
+			process_message(socket, data, gantry)
+		end
+
+	end
+end
+
+function beginGantry()
+	global gantry
+	gantry = Gantry( open("/dev/ttyUSB0", 115200), Position(0, 0, 0) )
+	write(gantry.port, "G28\n") # home
+end
+
+function beginHead()
+	global headIo
+	headIo = open("/dev/ttyACM0", 115200)
+	write(headIo, "G91\r") # put into relative coordinates
+end
+
+function beginController()
+	beginHead()
+	usageNotes()
+	beginVision()
+	beginGantry()
+	Threads.@spawn headSequenceOnRepeat()
+	Threads.@spawn openAndHandleWebsocket()
+end
+
+function endController()
+	global gantry, headIo
+	close(gantry.port)
+	close(headIo)
+end
+
+end # module Controller
