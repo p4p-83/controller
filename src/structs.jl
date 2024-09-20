@@ -1,3 +1,5 @@
+import Base.+	# so we can extend it
+
 mutable struct MachineState
 	# all in stepper steps
 	home::ComplexF64 	# where the home position is with respect to the datum
@@ -7,15 +9,11 @@ mutable struct MachineState
 	v::Bool				# vacuum #? — does this belong here?
 end
 
-# struct NominalTranslation
-# 	xy::ComplexF64				# mm
-# end
-
-struct NominalRotation
+struct ArbitraryRotation
 	# rotation about arbitrary ("virtual") axis
 	angle::Float64				# rad
 	virtualCentre::ComplexF64	# mm
-	NominalRotation(angle, virtualCentre=0.0+0.0j) = new(angle, virtualCentre) 
+	ArbitraryRotation(angle, virtualCentre=0.0+0.0j) = new(angle, virtualCentre) 
 end
 
 mutable struct CompoundMovement
@@ -25,16 +23,12 @@ mutable struct CompoundMovement
 	
 	CompoundMovement(xy::ComplexF64, r::Float64=0.0) = new(xy, r)
 	
-	function CompoundMovement(nr::NominalRotation)
+	function CompoundMovement(ar::ArbitraryRotation)
 		# nozzle axis is the datum
 		# convert rotation to something achievable
-		correctiveTranslation = n.virtualCentre*(1-cis(n.angle))
-		new(correctiveTranslation, n.angle)
+		correctiveTranslation = ar.virtualCentre*(1-cis(ar.angle))
+		new(correctiveTranslation, ar.angle)
 	end
-
-	# function CompoundMovement(nt::NominalTranslation)
-	# 	new(nt.xy, 0.0)
-	# end
 
 end
 
@@ -44,7 +38,6 @@ function simplifyState(s::MachineState)
 	s.r = s.r % stepsPerRevolutionR
 end
 
-import Base.+
 function +(m1::CompoundMovement, m2::CompoundMovement)
 	return CompoundMovement(
 		m1.xy + m2.xy,
@@ -53,7 +46,12 @@ function +(m1::CompoundMovement, m2::CompoundMovement)
 end
 
 function +(ms::MachineState, cm::CompoundMovement)
-	ms.xy += cm.xy
-	ms.r += cm.r
+	return MachineState(
+		ms.home + cm.xy,
+		ms.z,
+		ms.r + cm.r,
+		ms.p,
+		ms.v
+	)
 end
 

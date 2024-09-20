@@ -3,11 +3,11 @@
 
 using Statistics # for `mean()`
 
-function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, selectivity=5, plotting=false)
+function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, selectivity=5)
 	# leads is a list of the lead centroids
 	# pads is a list of the pad centroids
 	
-	reference = leads[1]
+	reference = leads[referenceLeadIndex]
 	pads .-= reference
 	leads .-= reference
 
@@ -49,15 +49,19 @@ function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, select
 	binOrdering = sortperm(bins, rev=true)
 	rankedAngles = binLabels[binOrdering]
 
+	return CompoundMovement.(ArbitraryRotation.(rankedAngles[1:5], reference))
+
 	# if the desired centre of rotation isn't the actual centre of rotation of the nozzle, it will move
 	# calculate the required translation to "catch" it
-	correctiveTranslation = @. reference*(1-cis(rankedAngles))
+	# correctiveTranslation = @. reference*(1-cis(rankedAngles))
 
-	return MachineMovement.(correctiveTranslation, rankedAngles)[1:5]
+	# return MachineMovement.(correctiveTranslation, rankedAngles)[1:5]
 
 end
 
-function wick(leads, pads ; plotting=false)
+function wick(leads, pads)
+
+	totalMovement = CompoundMovement(0.0+0.0j, 0.0)
 
 	# STEP 0 — PREPARATION
 	# find corresponding pad for each lead
@@ -67,18 +71,19 @@ function wick(leads, pads ; plotting=false)
 		push!(mapping, argmin(deltas))
 	end
 
-	# variables to keep track of the movements we make (so we can apply them to the machine)
-	trackedTranslation::ComplexF64 = 0	# all of this applied to the pads
-	trackedRotation::Float64 = 0	# all of this applied to the leads
+	# # variables to keep track of the movements we make (so we can apply them to the machine)
+	# trackedTranslation::ComplexF64 = 0	# all of this applied to the pads
+	# trackedRotation::Float64 = 0	# all of this applied to the leads
 
 	# STEP 1 — REMOVE NET TRANSLATION
 	# step 2 requires this gone first
 	movements = pads[mapping].-leads
 	meanMovement = mean(movements)
 	pads .-= meanMovement
-	trackedTranslation += meanMovement
+	# trackedTranslation += meanMovement
+	totalMovement += CompoundMovement(meanMovement)
 
-	movements = leads.-pads[mapping]
+	movements = leads.-pads[mapping]	#? do I still need these?
 	meanMovement = mean(movements)
 
 	# STEP 2 — REMOVE ROTATION
@@ -88,17 +93,20 @@ function wick(leads, pads ; plotting=false)
 	# calculate rotational correction
 	subtendedAngles = angle.(pads[mapping].-centreOfRotation) .- angle.(leads.-centreOfRotation)
 	meanRotation = mean(subtendedAngles)
+	totalMovement += CompoundMovement(ArbitraryRotation(meanRotation, centreOfRotation))
 
-	# if the desired centre of rotation isn't the actual centre of rotation of the nozzle, it will move
-	# calculate the required translation to "catch" it
-	correctiveTranslation = centreOfRotation*(1-cis(meanRotation))
+	return totalMovement
 
-	# make these corrections
-	leads .*= cis(meanRotation)
-	trackedRotation += meanRotation
-	pads .-= correctiveTranslation
-	trackedTranslation += correctiveTranslation
+	# # if the desired centre of rotation isn't the actual centre of rotation of the nozzle, it will move
+	# # calculate the required translation to "catch" it
+	# correctiveTranslation = centreOfRotation*(1-cis(meanRotation))
 
-	return MachineMovement(trackedTranslation, trackedRotation)
+	# # make these corrections
+	# leads .*= cis(meanRotation)
+	# trackedRotation += meanRotation
+	# pads .-= correctiveTranslation
+	# trackedTranslation += correctiveTranslation
+
+	# return MachineMovement(trackedTranslation, trackedRotation)
 	
 end
