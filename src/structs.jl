@@ -2,7 +2,7 @@ import Base.+	# so we can extend it
 
 mutable struct MachineState
 	# all in stepper steps
-	home::ComplexF64 	# where the home position is with respect to the datum
+	home::ComplexF64 	# where the home position is with respect to the datum 	# TODO do I want to temporarily forget about this frame of reference stuff and make this more comprehensible?
 	z::Float64			# z axis position
 	r::Float64			# roll, radians (nozzle rotation axis)
 	p::Float64			# pitch, radians (head pitch axis)
@@ -26,6 +26,10 @@ mutable struct CompoundMovement
 	function CompoundMovement(ar::ArbitraryRotation)
 		# nozzle axis is the datum
 		# convert rotation to something achievable
+		# basically we just do the rotation anyway, predict where the virtual
+		# centre of rotation will end up, and then move the PCB by the same
+		# amount to "catch" the virtual centre of rotation (so it appears not
+		# to have moved at all)
 		correctiveTranslation = ar.virtualCentre*(1-cis(ar.angle))
 		new(correctiveTranslation, ar.angle)
 	end
