@@ -92,7 +92,7 @@ function opticalToTrue(opticalCoord_px::ComplexF64, calibration::CalibrationCons
 
 end
 
-function trueToOptical(trueCoord_mm::ComplexF64, calibration::CalibrationConstants)
+function trueToOptical(trueCoord_mm::ComplexF64, calibration::CalibrationConstants)::ComplexF64
 
 	# forwards was:
 	# px wrt CoD = px - CoD
