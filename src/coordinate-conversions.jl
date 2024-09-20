@@ -38,6 +38,25 @@ struct CalibrationConstants
 
 end
 
+# for the live placement preview (composited video feed)
+function getRequiredUpwardImageOffsetWrtDownwardImage(upwardCalibration::CalibrationConstants, downwardCalibration::CalibrationConstants)
+
+	# upward image will be offset by some number of pixels so as to line the datums up
+	upwDatWrtDownDat_px = upwardCalibration.datum_px - downwardCalibration.datum_px
+
+	# correct for this
+	correctiveTranslation = -upwDatWrtDownDat_px
+	return correctiveTranslation
+
+	# TODO do I need to worry about rotational misalignments??
+	# — probably not, as the only necessary alignment is a correspondance between the two datums?
+	# — or actually maybe yes, as we assume that the rotations are aligned, and if they're not … hmm
+	# — or perhaps yes but no, as it probably will directly affect the placement but can be taken out to
+	# a sufficient degree mechanically, so it's not something to worry about
+	# I won't worry about correcting it now, as correcting it is fairly computationally intensive
+
+end
+
 function getDatumWrtCoD_mm(calibration::CalibrationConstants)
 	datumWrtCoD_px = calibration.datum_px - calibration.centreOfDistortion_px
 	datumWrtCoD_mm = interpmag(datumWrtCoD_px, calibration.radialDistortionOpticalValues_px, calibration.radialDistortionTrueValues_mm)
