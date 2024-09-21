@@ -103,8 +103,26 @@ end
 
 function send_message(socket::WebSocket, data::IOBuffer)
     buffer = take!(data)
-    println("Generated message: ", buffer)
+    # println("Generated message: ", buffer)
     WebSockets.send(socket, buffer)
+end
+
+function sendCentroidsToFrontend(socket::WebSocket)
+	encoder = ProtoEncoder(IOBuffer())	
+	
+	snapPositions = getSnapMarkerPositions()
+	encode(encoder, pnp.v1.Message(
+		pnp.v1.var"Message.Tags".TARGET_POSITIONS,
+		OneOf(
+			:positions,
+			# pnp.v1.var"Message.Positions"(randomPositions)
+			pnp.v1.var"Message.Positions"(snapPositions)
+		)
+	))
+
+	if position(encoder.io) != 0
+        send_message(socket, encoder.io)
+    end
 end
 
 function process_message(socket::WebSocket, data::Any, gantry::Gantry)
@@ -136,18 +154,6 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
         encode(encoder, pnp.v1.Message(
             pnp.v1.var"Message.Tags".HEARTBEAT,
             nothing
-        ))
-        send_message(socket, encoder.io)
-
-		# randomPositions = generate_random_positions()
-		snapPositions = getSnapMarkerPositions()
-        encode(encoder, pnp.v1.Message(
-            pnp.v1.var"Message.Tags".TARGET_POSITIONS,
-            OneOf(
-                :positions,
-                # pnp.v1.var"Message.Positions"(randomPositions)
-                pnp.v1.var"Message.Positions"(snapPositions)
-            )
         ))
 
     elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
@@ -225,8 +231,9 @@ headIo::Union{Nothing, LibSerialPort.SerialPort} = nothing
 function headSequence()
 	global headIo
 
-	pushNozzleOut() = write(headIo, "G1 Y-1.85 F600\r")
-	pullNozzleIn() = write(headIo, "G1 Y1.85 F600\r")
+	pushNozzleOut() = write(headIo, "G1 Y-1.8 F600\r")
+	pullNozzleIn() = write(headIo, "G1 Y1.8 F600\r")
+	spin() = write(headIo, "G1 Z0.5 F50\r")
 	# must move nozzle axis in tandem as it is coupled to the head axis
 	rotateHeadDown(distance) = write(headIo, "G1 Y-$(distance*gearRatio) X-$distance F2000\r")
 	rotateHeadUp(distance) = write(headIo, "G1 Y$(distance*gearRatio) X$distance F2000\r")
@@ -240,6 +247,7 @@ function headSequence()
 		
 		rotateHeadUp(5.5)
 		pushNozzleOut()
+		spin()
 		pullNozzleIn()
 
 	end
@@ -253,7 +261,17 @@ function headSequence()
 
 	setFreezeFramed(false)
 	
-    sleep(2)
+    sleep(4)
+
+end
+
+function headSequence2OnRepeat()
+	global headIo
+
+	while true
+		write(headIo, "G1 Z10 F50\r")
+		sleep(2)
+	end
 
 end
 
@@ -267,6 +285,11 @@ function openAndHandleWebsocket()
 	WebSockets.listen("0.0.0.0", 8080) do socket
 		println("Client connected")
 	
+		Threads.@spawn while true
+			sendCentroidsToFrontend(socket)
+			sleep(0.5)
+		end
+
 		for data in socket
 			println()
 			println("Received data: ", data)
@@ -281,11 +304,14 @@ function beginGantry()
 	global gantry
 	gantry = Gantry( open("/dev/ttyUSB0", 115200), Position(0, 0, 0) )
 	write(gantry.port, "G28\n") # home
+	sleep(1)
+	write(gantry.port, "G0 X150000 Y100000\n")
+	sleep(5)
 end
 
 function beginHead()
 	global headIo
-	headIo = open("/dev/ttyACM0", 115200)
+	headIo = open("/dev/ttyACM1", 115200)
 	write(headIo, "G91\r") # put into relative coordinates
 end
 
@@ -295,6 +321,7 @@ function beginController()
 	beginVision()
 	beginGantry()
 	Threads.@spawn headSequenceOnRepeat()
+	# Threads.@spawn headSequence2OnRepeat()
 	Threads.@spawn openAndHandleWebsocket()
 end
 

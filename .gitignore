@@ -3,3 +3,4 @@
 mediamtx/
 node_modules/
 dist/
+.vscode/settings.json
