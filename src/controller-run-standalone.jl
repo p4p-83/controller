@@ -20,7 +20,7 @@ Controller.beginController()
 #* keep alive
 while true 
 	sleep(2)
-	printCentroidsToStdOut()
+	# printCentroidsToStdOut()
 end
 
 #* stop

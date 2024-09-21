@@ -11,20 +11,20 @@ using .Vision
 const gearRatio::Float64 = 11 / 69.8
 
 mutable struct Position
-    x::Int32
-    y::Int32
-    z::Int32
+	x::Int32
+	y::Int32
+	z::Int32
 end
 
 mutable struct Gantry
-    port::SerialPort
-    position::Position
+	port::SerialPort
+	position::Position
 end
 
 mutable struct Calibration
-    x::Float32
-    y::Float32
-    z::Float32
+	x::Float32
+	y::Float32
+	z::Float32
 end
 
 function usageNotes()
@@ -55,7 +55,7 @@ println("""
 end
 
 function Base.:+(a::Position, b::Position)
-    return Position(a.x + b.x, a.y + b.y, a.z + b.z)
+	return Position(a.x + b.x, a.y + b.y, a.z + b.z)
 end
 
 # function generate_random_positions(max_length::Int=35)
@@ -74,37 +74,37 @@ function getSnapMarkerPositions(maxLength::Int=250)
 end
 
 function step_to_centre(socket::WebSocket, encoder::ProtoEncoder, deltas)
-    while deltas[1] != 0 || deltas[2] != 0
-        step = Int16[0, 0]
+	while deltas[1] != 0 || deltas[2] != 0
+		step = Int16[0, 0]
 
-        for i in 1:2
-            if deltas[i] > 0
-                actual_step = min(1000, deltas[i])
-                deltas[i] -= actual_step
-                step[i] = actual_step
-            elseif deltas[i] < 0
-                actual_step = min(1000, -deltas[i])
-                deltas[i] += actual_step
-                step[i] = -actual_step
-            end
-        end
+		for i in 1:2
+			if deltas[i] > 0
+				actual_step = min(1000, deltas[i])
+				deltas[i] -= actual_step
+				step[i] = actual_step
+			elseif deltas[i] < 0
+				actual_step = min(1000, -deltas[i])
+				deltas[i] += actual_step
+				step[i] = -actual_step
+			end
+		end
 
-        println("Stepped: ", step)
-        encode(encoder, pnp.v1.Message(
-            pnp.v1.var"Message.Tags".MOVED_DELTAS,
-            OneOf(
-                :deltas,
-                pnp.v1.var"Message.Deltas"(step[1], step[2])
-            )
-        ))
-        send_message(socket, encoder.io)
-    end
+		println("Stepped: ", step)
+		encode(encoder, pnp.v1.Message(
+			pnp.v1.var"Message.Tags".MOVED_DELTAS,
+			OneOf(
+				:deltas,
+				pnp.v1.var"Message.Deltas"(step[1], step[2])
+			)
+		))
+		send_message(socket, encoder.io)
+	end
 end
 
 function send_message(socket::WebSocket, data::IOBuffer)
-    buffer = take!(data)
-    # println("Generated message: ", buffer)
-    WebSockets.send(socket, buffer)
+	buffer = take!(data)
+	# println("Generated message: ", buffer)
+	WebSockets.send(socket, buffer)
 end
 
 function sendCentroidsToFrontend(socket::WebSocket)
@@ -121,13 +121,13 @@ function sendCentroidsToFrontend(socket::WebSocket)
 	))
 
 	if position(encoder.io) != 0
-        send_message(socket, encoder.io)
-    end
+		send_message(socket, encoder.io)
+	end
 end
 
 function process_message(socket::WebSocket, data::Any, gantry::Gantry)
-    println("Non-UInt8[] data received: ", data)
-    return nothing
+	println("Non-UInt8[] data received: ", data)
+	return nothing
 end
 
 # Assume that you can see 8x 10mm squares on the video feed.
@@ -135,138 +135,159 @@ end
 # Therefore, to denormalise into millimetres, we must multiply received deltas by (80 mm / 65536).
 # To normalise into micrometres, we multiply this factor by (1000 um / 1 mm).
 # Therefore, a reasonable starting calibration is (80000 um / 65536).
-calibration = Calibration((80000 / 65536), (80000 / 65536), 0)
+# calibration default: uh, they're empirical values
+calibration = Calibration(-1.0508553, 1.0789665, 0)
 
 function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::Gantry)
-    decoder = ProtoDecoder(IOBuffer(data))
-    message = decode(decoder, pnp.v1.Message)
+	decoder = ProtoDecoder(IOBuffer(data))
+	message = decode(decoder, pnp.v1.Message)
 
-    if isnothing(message)
-        println("Received message")
-        return nothing
-    else
-        println("Received message: ", message)
-    end
+	if isnothing(message)
+		println("Received message")
+		return nothing
+	else
+		println("Received message: ", message)
+	end
 
-    encoder = ProtoEncoder(IOBuffer())
+	encoder = ProtoEncoder(IOBuffer())
 
-    if message.tag == pnp.v1.var"Message.Tags".HEARTBEAT
-        encode(encoder, pnp.v1.Message(
-            pnp.v1.var"Message.Tags".HEARTBEAT,
-            nothing
-        ))
+	if message.tag == pnp.v1.var"Message.Tags".HEARTBEAT
+		encode(encoder, pnp.v1.Message(
+			pnp.v1.var"Message.Tags".HEARTBEAT,
+			nothing
+		))
 
-    elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
-        payload = message.payload
+	elseif message.tag == pnp.v1.var"Message.Tags".TARGET_DELTAS
+		payload = message.payload
 
-        if payload.name !== :deltas
-            println("Missing deltas!", payload)
-        else
-            println("Deltas: ", payload[])
+		if payload.name !== :deltas
+			println("Missing deltas!", payload)
+		else
+			println("Deltas: ", payload[])
 
-            println("Gantry currently at $(gantry.position)")
-            println("Calibration is currently $(calibration)")
+			println("Gantry currently at $(gantry.position)")
+			println("Calibration is currently $(calibration)")
 
-            gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
-            if gantry.position.x < 0
-                gantry.position.x = 0
-            end
-            if gantry.position.y < 0
-                gantry.position.y = 0
-            end
+			gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
+			if gantry.position.x < 0
+				gantry.position.x = 0
+			end
+			if gantry.position.y < 0
+				gantry.position.y = 0
+			end
 
-            write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
-            # TODO: update machine state
-            println("Moved gantry to $(gantry.position)")
+			write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
+			# TODO: update machine state
+			println("Moved gantry to $(gantry.position)")
 
-            step_to_centre(socket, encoder, [payload[].x, payload[].y])
-        end
+			step_to_centre(socket, encoder, [payload[].x, payload[].y])
+		end
 
-    elseif message.tag == pnp.v1.var"Message.Tags".CALIBRATE_DELTAS
-        payload = message.payload
+	elseif message.tag == pnp.v1.var"Message.Tags".CALIBRATE_DELTAS
+		payload = message.payload
 
-        if payload.name !== :calibration
-            println("Missing calibration!", payload)
-        else
-            println("Target deltas: ", payload[].target)
-            println("Real deltas: ", payload[].real)
+		if payload.name !== :calibration
+			println("Missing calibration!", payload)
+		else
+			println("Target deltas: ", payload[].target)
+			println("Real deltas: ", payload[].real)
 
-            println("Current calibration is $(calibration)")
+			println("Current calibration is $(calibration)")
 
-            calibration.x = calibration.x / (1 - (payload[].real.x / payload[].target.x))
-            calibration.y = calibration.y / (1 - (payload[].real.y / payload[].target.y))
+			calibration.x = calibration.x / (1 - (payload[].real.x / payload[].target.x))
+			calibration.y = calibration.y / (1 - (payload[].real.y / payload[].target.y))
 
-            println("Calibrated to $(calibration)")
-        end
+			println("Calibrated to $(calibration)")
+		end
 
-    elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
-        payload = message.payload
+	elseif message.tag == pnp.v1.var"Message.Tags".STEP_GANTRY
+		payload = message.payload
 
-        if payload.name !== :step
-            println("Missing step!", payload)
-        else
-            direction = payload[].direction
+		if payload.name !== :step
+			println("Missing step!", payload)
+		else
+			direction = payload[].direction
 
-            println("Gantry currently at $(gantry.position)")
+			println("Gantry currently at $(gantry.position)")
 
-            if direction == pnp.v1.var"Message.Step.Direction".ZERO
-                write(gantry.port, "G28\n")
-                gantry.position = Position(0, 0, 0)
-            end
+			if direction == pnp.v1.var"Message.Step.Direction".ZERO
+				write(gantry.port, "G28\n")
+				gantry.position = Position(0, 0, 0)
+			end
 
-            # TODO: update machine state
+			# TODO: update machine state
 
-            println("Moved gantry to $(gantry.position)")
+			println("Moved gantry to $(gantry.position)")
 
-        end
+		end
 
-    elseif message.tag == pnp.v1.var"Message.Tags".OPERATE_HEAD
-        payload = message.payload
+	elseif message.tag == pnp.v1.var"Message.Tags".OPERATE_HEAD
+		payload = message.payload
 
-        if payload.name !== :headOperation
-            println("Missing head operation!", payload)
-        else
-            operation = payload[].operation
+		if payload.name !== :headOperation
+			println("Missing head operation!", payload)
+		else
+			operation = payload[].operation
 
-            if operation == pnp.v1.var"Message.HeadOperation.Operation".PICK
-                # write(gantry.port, "G28\n")
-                # gantry.position = Position(0, 0, 0)
-                # TODO: head down
-                # TODO: engage vacuum
-                # TODO: head up
-                # TODO: update machine state
-            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".PLACE
-                # TODO: head down
-                # TODO: disengage vacuum
-                # TODO: head up
-                # TODO: update machine state
-                # The remaining operations are for manual overrides only
-            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".ENGAGE_VACUUM
-                # TODO: engage vacuum
-                # TODO: update machine state
-            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".DISENGAGE_VACUUM
-                # TODO: disengage vacuum
-                # TODO: update machine state
-            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".LOWER_HEAD
-                # TODO: lower head
-                # TODO: update machine state
-            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".RAISE_HEAD
-                # TODO: raise head
-                # TODO: update machine state
-            end
+			if operation == pnp.v1.var"Message.HeadOperation.Operation".PICK
+				# write(gantry.port, "G28\n")
+				# gantry.position = Position(0, 0, 0)
+				# extendUnextendHead(false)
+				cockUncockHead(false)
+				setVacuum(true)
+				extendUnextendHead(true)
+				extendUnextendHead(false)
+				cockUncockHead(true)
+			elseif operation == pnp.v1.var"Message.HeadOperation.Operation".PLACE
+				# extendUnextendHead(false)
+				cockUncockHead(false)
+				extendUnextendHead(true)
+				setVacuum(false)
+				extendUnextendHead(false)
+				cockUncockHead(true)
+				# The remaining operations are for manual overrides only
+			elseif operation == pnp.v1.var"Message.HeadOperation.Operation".ENGAGE_VACUUM
+				# TODO: engage vacuum
+				# TODO: update machine state
+			elseif operation == pnp.v1.var"Message.HeadOperation.Operation".DISENGAGE_VACUUM
+				# TODO: disengage vacuum
+				# TODO: update machine state
+			elseif operation == pnp.v1.var"Message.HeadOperation.Operation".LOWER_HEAD
+				# TODO: lower head
+				# TODO: update machine state
+			elseif operation == pnp.v1.var"Message.HeadOperation.Operation".RAISE_HEAD
+				# TODO: raise head
+				# TODO: update machine state
+			end
 
-        end
+		end
 
-    end
+	end
 
-    if position(encoder.io) != 0
-        send_message(socket, encoder.io)
-    end
+	if position(encoder.io) != 0
+		send_message(socket, encoder.io)
+	end
 
 end
 
 gantry::Union{Nothing, Gantry} = nothing
 headIo::Union{Nothing, LibSerialPort.SerialPort} = nothing
+
+function extendUnextendHead(extend)
+	global headIo
+	write(headIo, "G1 Y$(extend ? "-1.8" : "1.8") F600\r")
+end
+
+function cockUncockHead(facingCamera)
+	global headIo
+	distance = 5.5
+	write(headIo, "G1 Y$(distance*gearRatio) X$(facingCamera ? "$distance" : "-$distance") F2000\r")
+end
+
+function setVacuum(shouldBeOn)
+	global headIo
+	write(headIo, shouldBeOn ? "M8\r" : "M9\r")
+end
 
 function headSequence()
 	global headIo
@@ -302,7 +323,7 @@ function headSequence()
 
 	setFreezeFramed(false)
 	
-    sleep(4)
+	sleep(4)
 
 end
 
@@ -347,14 +368,16 @@ function beginGantry()
 	gantry = Gantry( open("/dev/ttyUSB0", 115200), Position(0, 0, 0) )
 	write(gantry.port, "G28\n") # home
 	sleep(1)
-	write(gantry.port, "G0 X150000 Y100000\n")
-	sleep(5)
+	# write(gantry.port, "G0 X150000 Y100000\n")
+	# sleep(5)
 end
 
 function beginHead()
 	global headIo
-	headIo = open("/dev/ttyACM1", 115200)
+	headIo = open("/dev/ttyACM0", 115200)
 	write(headIo, "G91\r") # put into relative coordinates
+	write(headIo, "\$1=255\r")
+	write(headIo, "G1 Z1 F200\r")
 end
 
 function beginController()
@@ -362,7 +385,7 @@ function beginController()
 	usageNotes()
 	beginVision()
 	beginGantry()
-	Threads.@spawn headSequenceOnRepeat()
+	# Threads.@spawn headSequenceOnRepeat()
 	# Threads.@spawn headSequence2OnRepeat()
 	Threads.@spawn openAndHandleWebsocket()
 end
