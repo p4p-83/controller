@@ -281,6 +281,7 @@ function headSequence()
 	function dispatchSequence()
 		# all gets sent at once and queued by the head
 		
+		# TODO: update machine state
 		rotateHeadDown(5.5)
 		pushNozzleOut()
 		pullNozzleIn()
@@ -310,6 +311,7 @@ function headSequence2OnRepeat()
 
 	while true
 		write(headIo, "G1 Z10 F50\r")
+		# TODO: update machine state
 		sleep(2)
 	end
 
