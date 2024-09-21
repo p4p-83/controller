@@ -176,6 +176,7 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
             end
 
             write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
+            # TODO: update machine state
             println("Moved gantry to $(gantry.position)")
 
             step_to_centre(socket, encoder, [payload[].x, payload[].y])
@@ -213,7 +214,46 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
                 gantry.position = Position(0, 0, 0)
             end
 
+            # TODO: update machine state
+
             println("Moved gantry to $(gantry.position)")
+
+        end
+
+    elseif message.tag == pnp.v1.var"Message.Tags".OPERATE_HEAD
+        payload = message.payload
+
+        if payload.name !== :headOperation
+            println("Missing head operation!", payload)
+        else
+            operation = payload[].operation
+
+            if operation == pnp.v1.var"Message.HeadOperation.Operation".PICK
+                # write(gantry.port, "G28\n")
+                # gantry.position = Position(0, 0, 0)
+                # TODO: head down
+                # TODO: engage vacuum
+                # TODO: head up
+                # TODO: update machine state
+            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".PLACE
+                # TODO: head down
+                # TODO: disengage vacuum
+                # TODO: head up
+                # TODO: update machine state
+                # The remaining operations are for manual overrides only
+            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".ENGAGE_VACUUM
+                # TODO: engage vacuum
+                # TODO: update machine state
+            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".DISENGAGE_VACUUM
+                # TODO: disengage vacuum
+                # TODO: update machine state
+            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".LOWER_HEAD
+                # TODO: lower head
+                # TODO: update machine state
+            elseif operation == pnp.v1.var"Message.HeadOperation.Operation".RAISE_HEAD
+                # TODO: raise head
+                # TODO: update machine state
+            end
 
         end
 
