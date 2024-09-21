@@ -13,7 +13,6 @@ const gearRatio::Float64 = 11 / 69.8
 mutable struct Position
     x::Int32
     y::Int32
-    z::Int32
 end
 
 mutable struct Gantry
@@ -28,34 +27,30 @@ mutable struct Calibration
 end
 
 function usageNotes()
-println("""
+    println("""
 
-╒═══════════════════════════════════════════════════════════════════════════╕
-│ starting $(" controller.jl " |> YELLOW_BG |> WHITE_FG)                                                  │
-│                                                                           │
-│ This is the master file for the physical pick and place machine.          │
-│                                                                           │
-│ Note that this application is multithreaded, and you currently have       │
-│ $("$(n=Threads.nthreads()) thread$(n==1 ? "" : "s")"|>BOLD|>YELLOW_FG) allocated to Julia. Julia can handle the task switching within   │
-│ the threads allocated to it and thus function with virtually any number   │
-│ of OS threads (as I understand it), but for the best possible performance │
-│ you should probably ensure that this number of OS-allocated threads is    │
-│ sensible. You can change this with $("export JULIA_NUM_THREADS=2" |> ITALICS) from        │
-│ the shell.                                                                │
-│                                                                           │
-│ You can also run this code from the REPL, but there are unlikely to be    │
-│ any net benefits to gain from doing this (you'll have to pay particular   │
-│ attention to closing all opened resources. However, if you do choose to   │
-│ use the REPL, it will adopt the number of threads $("export"|>ITALICS)ed, or if         │
-│ connected to VS Code will follow the $("\"julia.NumThreads\": 2" |> ITALICS) setting        │
-│ in the host machine's VS Code settings.json.                              │
-│                                                                           │
-└───────────────────────────────────────────────────────────────────────────┘
-""")
-end
-
-function Base.:+(a::Position, b::Position)
-    return Position(a.x + b.x, a.y + b.y, a.z + b.z)
+    ╒═══════════════════════════════════════════════════════════════════════════╕
+    │ starting $(" controller.jl " |> YELLOW_BG |> WHITE_FG)                                                  │
+    │                                                                           │
+    │ This is the master file for the physical pick and place machine.          │
+    │                                                                           │
+    │ Note that this application is multithreaded, and you currently have       │
+    │ $("$(n=Threads.nthreads()) thread$(n==1 ? "" : "s")"|>BOLD|>YELLOW_FG) allocated to Julia. Julia can handle the task switching within   │
+    │ the threads allocated to it and thus function with virtually any number   │
+    │ of OS threads (as I understand it), but for the best possible performance │
+    │ you should probably ensure that this number of OS-allocated threads is    │
+    │ sensible. You can change this with $("export JULIA_NUM_THREADS=2" |> ITALICS) from        │
+    │ the shell.                                                                │
+    │                                                                           │
+    │ You can also run this code from the REPL, but there are unlikely to be    │
+    │ any net benefits to gain from doing this (you'll have to pay particular   │
+    │ attention to closing all opened resources. However, if you do choose to   │
+    │ use the REPL, it will adopt the number of threads $("export"|>ITALICS)ed, or if         │
+    │ connected to VS Code will follow the $("\"julia.NumThreads\": 2" |> ITALICS) setting        │
+    │ in the host machine's VS Code settings.json.                              │
+    │                                                                           │
+    └───────────────────────────────────────────────────────────────────────────┘
+    """)
 end
 
 # function generate_random_positions(max_length::Int=35)
@@ -68,9 +63,9 @@ end
 # end
 
 function getSnapMarkerPositions(maxLength::Int=250)
-	padCoordsList = Vision.getCentroidsNorm(1)[1:min(end, maxLength)]
-	positions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in padCoordsList]
-	return positions
+    padCoordsList = Vision.getCentroidsNorm(1)[1:min(end, maxLength)]
+    positions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in padCoordsList]
+    return positions
 end
 
 function step_to_centre(socket::WebSocket, encoder::ProtoEncoder, deltas)
@@ -139,8 +134,8 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
         ))
         send_message(socket, encoder.io)
 
-		# randomPositions = generate_random_positions()
-		snapPositions = getSnapMarkerPositions()
+        # randomPositions = generate_random_positions()
+        snapPositions = getSnapMarkerPositions()
         encode(encoder, pnp.v1.Message(
             pnp.v1.var"Message.Tags".TARGET_POSITIONS,
             OneOf(
@@ -161,16 +156,10 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
             println("Gantry currently at $(gantry.position)")
             println("Calibration is currently $(calibration)")
 
-            gantry.position += Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y), 0)
-            if gantry.position.x < 0
-                gantry.position.x = 0
-            end
-            if gantry.position.y < 0
-                gantry.position.y = 0
-            end
+            gantry.position = Position(trunc(Int, payload[].x * calibration.x), trunc(Int, payload[].y * calibration.y))
 
-            write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y) Z$(gantry.position.z)\n")
-            println("Moved gantry to $(gantry.position)")
+            write(gantry.port, "G0 X$(gantry.position.x) Y$(gantry.position.y)\n")
+            println("Moved gantry by $(gantry.position)")
 
             step_to_centre(socket, encoder, [payload[].x, payload[].y])
         end
@@ -204,7 +193,7 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
 
             if direction == pnp.v1.var"Message.Step.Direction".ZERO
                 write(gantry.port, "G28\n")
-                gantry.position = Position(0, 0, 0)
+                gantry.position = Position(0, 0)
             end
 
             println("Moved gantry to $(gantry.position)")
@@ -219,89 +208,90 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
 
 end
 
-gantry::Union{Nothing, Gantry} = nothing
-headIo::Union{Nothing, LibSerialPort.SerialPort} = nothing
+gantry::Union{Nothing,Gantry} = nothing
+headIo::Union{Nothing,LibSerialPort.SerialPort} = nothing
 
 function headSequence()
-	global headIo
+    global headIo
 
-	pushNozzleOut() = write(headIo, "G1 Y-1.85 F600\r")
-	pullNozzleIn() = write(headIo, "G1 Y1.85 F600\r")
-	# must move nozzle axis in tandem as it is coupled to the head axis
-	rotateHeadDown(distance) = write(headIo, "G1 Y-$(distance*gearRatio) X-$distance F2000\r")
-	rotateHeadUp(distance) = write(headIo, "G1 Y$(distance*gearRatio) X$distance F2000\r")
-	
-	function dispatchSequence()
-		# all gets sent at once and queued by the head
-		
-		rotateHeadDown(5.5)
-		pushNozzleOut()
-		pullNozzleIn()
-		
-		rotateHeadUp(5.5)
-		pushNozzleOut()
-		pullNozzleIn()
+    pushNozzleOut() = write(headIo, "G1 Y-1.85 F600\r")
+    pullNozzleIn() = write(headIo, "G1 Y1.85 F600\r")
+    # must move nozzle axis in tandem as it is coupled to the head axis
+    rotateHeadDown(distance) = write(headIo, "G1 Y-$(distance*gearRatio) X-$distance F2000\r")
+    rotateHeadUp(distance) = write(headIo, "G1 Y$(distance*gearRatio) X$distance F2000\r")
 
-	end
-	
-	setFreezeFramed(true)
+    function dispatchSequence()
+        # all gets sent at once and queued by the head
 
-	# send all of the commands in advance
-	dispatchSequence()
+        rotateHeadDown(5.5)
+        pushNozzleOut()
+        pullNozzleIn()
 
-	sleep(5)
+        rotateHeadUp(5.5)
+        pushNozzleOut()
+        pullNozzleIn()
 
-	setFreezeFramed(false)
-	
+    end
+
+    setFreezeFramed(true)
+
+    # send all of the commands in advance
+    dispatchSequence()
+
+    sleep(5)
+
+    setFreezeFramed(false)
+
     sleep(2)
 
 end
 
 function headSequenceOnRepeat()
-	while true
-		headSequence()
-	end
+    while true
+        headSequence()
+    end
 end
 
 function openAndHandleWebsocket()
-	WebSockets.listen("0.0.0.0", 8080) do socket
-		println("Client connected")
-	
-		for data in socket
-			println()
-			println("Received data: ", data)
-	
-			process_message(socket, data, gantry)
-		end
+    WebSockets.listen("0.0.0.0", 8080) do socket
+        println("Client connected")
 
-	end
+        for data in socket
+            println()
+            println("Received data: ", data)
+
+            process_message(socket, data, gantry)
+        end
+
+    end
 end
 
 function beginGantry()
-	global gantry
-	gantry = Gantry( open("/dev/ttyUSB0", 115200), Position(0, 0, 0) )
-	write(gantry.port, "G28\n") # home
+    global gantry
+    gantry = Gantry(open("/dev/ttyUSB0", 115200), Position(0, 0))
+    write(gantry.port, "G28\n") # home
+    write(gantry.port, "G91\n") # put into relative coordinates
 end
 
 function beginHead()
-	global headIo
-	headIo = open("/dev/ttyACM0", 115200)
-	write(headIo, "G91\r") # put into relative coordinates
+    global headIo
+    headIo = open("/dev/ttyACM0", 115200)
+    write(headIo, "G91\r") # put into relative coordinates
 end
 
 function beginController()
-	beginHead()
-	usageNotes()
-	beginVision()
-	beginGantry()
-	Threads.@spawn headSequenceOnRepeat()
-	Threads.@spawn openAndHandleWebsocket()
+    beginHead()
+    usageNotes()
+    beginVision()
+    beginGantry()
+    # Threads.@spawn headSequenceOnRepeat()
+    Threads.@spawn openAndHandleWebsocket()
 end
 
 function endController()
-	global gantry, headIo
-	close(gantry.port)
-	close(headIo)
+    global gantry, headIo
+    close(gantry.port)
+    close(headIo)
 end
 
 end # module Controller
