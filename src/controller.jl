@@ -262,6 +262,21 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
 
 		end
 
+	elseif message.tag == pnp.v1.var"Message.Tags".ROTATE_NOZZLE
+		payload = message.payload
+
+		if payload.name !== :nozzleRotation
+			println("Missing nozzle rotation!", payload)
+		else
+			degrees = payload[].degrees
+
+			# rotate nozzle
+			# +ve number is anti-clockwise
+			# in degrees
+			rotateNozzle(degrees)
+
+		end
+
 	end
 
 	if position(encoder.io) != 0
@@ -282,6 +297,11 @@ function cockUncockHead(facingCamera)
 	global headIo
 	distance = 5.5
 	write(headIo, "G1 Y$(distance*gearRatio) X$(facingCamera ? "$distance" : "-$distance") F2000\r")
+end
+
+function rotateNozzle(degrees)
+	global headIo
+	write(headIo, "G1 Z$(round(degrees/360, digits=3)) F50\r")
 end
 
 function setVacuum(shouldBeOn)
@@ -378,16 +398,24 @@ function beginHead()
 	write(headIo, "G91\r") # put into relative coordinates
 	write(headIo, "\$1=255\r")
 	write(headIo, "G1 Z1 F200\r")
+
+	#! assume that the head is parked pointing downwards at the reference location, touching the board
+	write(headIo, "G1 Y1.4 F100\r") # lift head
+	write(headIo, "G1 X5.5 Y$(5.5*gearRatio) F100\r")
+	write(headIo, "G1 Y-1.4 F100\r") # lift head
+
+	sleep(60) # give this time to happen or not happen before the gantry is moved
+
 end
 
 function beginController()
-	beginHead()
 	usageNotes()
 	beginVision()
+	beginHead()
 	beginGantry()
+	Threads.@spawn openAndHandleWebsocket()
 	# Threads.@spawn headSequenceOnRepeat()
 	# Threads.@spawn headSequence2OnRepeat()
-	Threads.@spawn openAndHandleWebsocket()
 end
 
 function endController()
