@@ -295,13 +295,15 @@ end
 
 function cockUncockHead(facingCamera)
 	global headIo
-	distance = 5.5
-	write(headIo, "G1 Y$(distance*gearRatio) X$(facingCamera ? "$distance" : "-$distance") F2000\r")
+	distance = facingCamera ? 5.5 : -5.5
+	# TODO double check — I think I need to spin Y the other way
+	write(headIo, "G1 Y$(distance*gearRatio) X$distance F2000\r")
 end
 
 function rotateNozzle(degrees)
 	global headIo
-	write(headIo, "G1 Z$(round(degrees/360, digits=3)) F50\r")
+	# TODO investigate — nozzle seems to jump in position when placing for some reason
+	write(headIo, "G1 Z$(round(-degrees/360, digits=3)) F50\r")
 end
 
 function setVacuum(shouldBeOn)
@@ -404,7 +406,7 @@ function beginHead()
 	write(headIo, "G1 X5.5 Y$(5.5*gearRatio) F100\r")
 	write(headIo, "G1 Y-1.4 F100\r") # lift head
 
-	sleep(60) # give this time to happen or not happen before the gantry is moved
+	sleep(6) # give this time to happen or not happen before the gantry is moved
 
 end
 
