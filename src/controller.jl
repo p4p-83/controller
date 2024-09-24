@@ -233,18 +233,26 @@ function process_message(socket::WebSocket, data::AbstractArray{UInt8}, gantry::
 				# write(gantry.port, "G28\n")
 				# gantry.position = Position(0, 0, 0)
 				# extendUnextendHead(false)
+				setFreezeFramed(true)
 				cockUncockHead(false)
 				setVacuum(true)
 				extendUnextendHead(true)
 				extendUnextendHead(false)
 				cockUncockHead(true)
+				sleep(5)	# TODO do better
+				setFreezeFramed(false)
+
 			elseif operation == pnp.v1.var"Message.HeadOperation.Operation".PLACE
 				# extendUnextendHead(false)
+				setFreezeFramed(true)
 				cockUncockHead(false)
 				extendUnextendHead(true)
 				setVacuum(false)
 				extendUnextendHead(false)
 				cockUncockHead(true)
+				sleep(5)
+				setFreezeFramed(false)
+
 				# The remaining operations are for manual overrides only
 			elseif operation == pnp.v1.var"Message.HeadOperation.Operation".ENGAGE_VACUUM
 				# TODO: engage vacuum
@@ -402,11 +410,28 @@ function beginHead()
 	write(headIo, "G1 Z1 F200\r")
 
 	#! assume that the head is parked pointing downwards at the reference location, touching the board
-	write(headIo, "G1 Y1.4 F100\r") # lift head
-	write(headIo, "G1 X5.5 Y$(5.5*gearRatio) F100\r")
-	write(headIo, "G1 Y-1.4 F100\r") # lift head
+	# write(headIo, "G1 Y1.4 F100\r") # lift head
+	# write(headIo, "G1 X5.5 Y$(5.5*gearRatio) F100\r")
+	# write(headIo, "G1 Y-1.4 F100\r") # lift head
 
 	sleep(6) # give this time to happen or not happen before the gantry is moved
+
+end
+
+function interactiveStartup()
+
+	# TODO implement
+	# all things off	# TODO default image for camera feed
+	# inform user to stand at 90°
+	# head holding torque goes on
+	# inform user to align over a reference mark
+	# lift head to upward position slowly
+	# show downwards, board pad camera feed
+	# inform user to click on reference mark on feed
+	# show upwards camera feed
+	# inform user to click centre of nozzle
+	# power on and home the gantry (or have user switch it on manually)
+	# apply calibration and start usual stuff
 
 end
 
