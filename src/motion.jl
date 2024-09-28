@@ -74,6 +74,11 @@ end
 # internal routines to do these things (and block execution as the motion completes)
 # let Julia's dynamic dispatch paradigm do the hard work for us
 
+function touchoffHead()
+	# TODO
+	# incremental head lowering with polling of nozzle cone
+end
+
 function executeHomeHead()
 	# TODO
 	# send homing command
@@ -99,7 +104,7 @@ function executeMovement(m::HeadManoeuvres)
 	# just switch on m == pick, m == place for vacuum
 	# also need to estimate the times
 	#? could G93 "Inverse Time" be useful? https://www.cnccookbook.com/feed-rate-mode-g-codes-g93-g94-and-g95/
-	#* need to do incremental head lowering with polling of nozzle cone!
+	#* need to do incremental head lowering with polling of nozzle cone! —> touchoffHead()
 end
 
 function executeMovement(m::ComponentMotion)
