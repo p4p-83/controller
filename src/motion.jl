@@ -1,12 +1,29 @@
-using Base.Threads, LibSerialPort
-import PiGPIO		# TODO prompt the user to run `sudo pigpiod` before running this  
+# motion.jl
+# adapts movement descriptions —> movement instructions —> gcodes
+# and then dispatches them
 
-const coneLimitPin::Int = 0	# TODO
+# performs bounds checking and manages work coordinates to keep numbers known
+
+# note I was kind of planning to write this in a way that would let in-progress moves
+# be cancelled mid-way-through
+# but then I didn't, 'cause that's kind of hard and I have little time left with this project
+
+using Base.Threads, LibSerialPort
+import PiGPIO							# TODO prompt the user to run `sudo pigpiod` before running this  
+
+const coneLimitPin::Int = 0				# TODO wiring
+const headHomePin::Int = 1		 		# TODO wiring
 
 # instances
 const piGpioInstance = PiGPIO.Pi()
 const gantryIo::LibSerialPort.SerialPort = open("/dev/ttyUSB0", 115200)
 const headIo::LibSerialPort.SerialPort = open("/dev/ttyACM0", 115200)
+
+# set switches up preemptively
+PiGPIO.set_mode(piGpioInstance, coneLimitPin, PiGPIO.INPUT)
+PiGPIO.set_mode(piGpioInstance, headHomePin, PiGPIO.INPUT)
+# PiGPIO.set_pull_up_down(piGpioInstance, coneLimitPin, PiGPIO.PUD_UP) # TODO review
+# PiGPIO.set_pull_up_down(piGpioInstance, headHomePin, PiGPIO.PUD_UP) # TODO review
 
 ###################
 # TYPES TO REPRESENT MOVEMENTS
@@ -43,9 +60,10 @@ nextMovementBeginLock = ReentrantLock()
 # accessed externally
 
 # public method to actually make a movement
-# takes affect immediately
+# takes affect as soon as any in-progress movement finishes
+# silently overwrites any previously-set pending move — you can only have one pending move
 function setMovement(m::Movement)
-	# TODO
+	@lock nextMovementBeginLock nextMovement = m
 end
 
 function setHeadHoldingTorque()
@@ -53,36 +71,21 @@ function setHeadHoldingTorque()
 	write(headIo, "\$1=255\r")
 end
 
-function awaitMovement()
-	lock(movementInProgressLock)
-	unlock(movementInProgressLock)
+@enum VacuumStates suck nosuck
+function setVacuum(s::VacuumStates)
+	global headIo
+	write(headIo, s == suck ? "M8\r" : "M9\r")
 end
+
+# TODO this ain't going to work
+# function awaitMovement()
+# 	lock(movementInProgressLock)
+# 	unlock(movementInProgressLock)
+# end
 
 ###################
 # MOVEMENT EXECUTION
 # managed internally
-
-# driver code to send the required gcode
-# everything should have been bounds checked and accounted for by this point — all points relative to home coordinates
-function sendMovementGcodes(; x=nothing, y=nothing, f1=600, u=nothing, v=nothing, r=nothing, th=1)
-
-	# create strings
-	gantryString = "G1"
-	if !isnothing(x) gantryString *= " X$x" end
-	if !isnothing(y) gantryString *= " Y$y" end
-	gantryString *= " F$f1\n"	# TODO no support for feed rates on this controller
-	
-	headString = "G1"
-	if !isnothing(u) headString *= " X$u" end
-	if !isnothing(v) headString *= " Y$v" end
-	if !isnothing(r) headString *= " Z$r" end
-	headString *= " F$th\r"		# TODO need to make sure this is in inverse time mode! (G93)
-
-	# dispatch
-	println(gantryString)
-	println(headString)
-
-end
 
 # state
 datumFromHomeX::Float64 = 0.		# gantry, limit switch homing
@@ -95,41 +98,127 @@ headRotation::Float64 = 0.			# no real home; just need the current pos.
 const head90degRotationU::Float64 = 5.5	# head, U axis movement corresponding to 90 degrees
 const headMaxExtensionV::Float64 = 1.8	# head, hard limit on head extension
 
+function rawGantryMovement(; dx=0, dy=0)
+	global datumFromHomeX, datumFromHomeY, gantryIo
+
+	gantryFeedrate = 10		# √(x^2 + y^2) units per second
+	
+	# TODO measure and set these
+	# mostly here to prevent head crashes, but they also prevent a certain spastic bug in the gantry controller from manifesting
+	gantryBoundsMinX = 100
+	gantryBoundsMaxX = 300
+	gantryBoundsMinY = 100
+	gantryBoundsMaxY = 300
+
+	isInBounds(x, y) = (gantryBoundsMinX <= x <= gantryBoundsMaxX) &&
+	                   (gantryBoundsMinY <= y <= gantryBoundsMaxY)
+	isCurrentlyInBounds = isInBounds(datumFromHomeX, datumFromHomeY)
+
+	# next positions
+	nextDatumFromHomeX = datumFromHomeX + dx
+	nextDatumFromHomeY = datumFromHomeY + dy
+
+	# cannot leave bounds if already in bounds
+	if isCurrentlyInBounds
+		clamp!(nextDatumFromHomeX, gantryBoundsMinX, gantryBoundsMaxX)
+		clamp!(nextDatumFromHomeY, gantryBoundsMinY, gantryBoundsMaxY)
+	end
+
+	dxAchieved = nextDatumFromHomeX - datumFromHomeX
+	dyAchieved = nextDatumFromHomeY - datumFromHomeY
+
+	datumFromHomeX = nextDatumFromHomeX
+	datumFromHomeY = nextDatumFromHomeY
+
+	# dispatch movement
+	write(gantryIo, "G1 X$datumFromHomeX Y$datumFromHomeY\n")
+
+	# block for movement duration
+	distance = sqrt(sum(abs2, [dxAchieved, dyAchieved]))
+	duration = distance / gantryFeedrate
+	sleep(duration)
+
+end
+
+function rawHeadMovement(; u=nothing, v=nothing, r=nothing, hduration=1)
+	global headIo
+
+	headGcodeString = "G1"
+	if !isnothing(u) headGcodeString *= " X$u" end
+	if !isnothing(v) headGcodeString *= " Y$v" end
+	if !isnothing(r) headGcodeString *= " Z$r" end
+	headGcodeString *= " F$(60/hduration)\r"			# inverse time feed rate is specified in min⁻¹
+
+	write(headIo, headGcodeString)	
+	sleep(hduration)
+
+end
+
 # internal routines to do these things (and block execution as the motion completes)
 # let Julia's dynamic dispatch paradigm do the hard work for us
 
 # incremental head lowering with polling of nozzle cone
 function touchoffHead()
-	global headFromRetractedV, headTouchoffV
+	global headFromRetractedV, headTouchoffV, piGpioInstance
 
 	extensionPerStep = 0.4
 	stepTime = 0.1 			# seconds
 
 	for v in range(headFromRetractedV, headMaxExtensionV, step=extensionPerStep)
 
-		# make a step
-		sendMovementGcodes(v=v, th=(60/stepTime))	# inverse time is in min⁻¹
-		sleep(stepTime)
-		headTouchoffV = v
-		if PiGPIO.read(piGpioInstance, coneLimitPin) break end	# TODO requires PiGPIO.set_mode(p::Pi, pin::Int, mode)
+		rawHeadMovement(v=v, hduration=stepTime)				# make a step
+		headTouchoffV = v										# save position as touch-off location in case we break	
+		if PiGPIO.read(piGpioInstance, coneLimitPin) break end	# stop if we've arrived
 
 	end
 
 end
 
 function executeHomeHead()
-	global headIo
-	write(headIo, "G28\r") 	# G28 home	# TODO is this even possible — I don't have limits on the other axes! Do I need to do this from the Pi too?
-	write(headIo, "G93\r")	# G93 inverse time mode — touchoff needs this TODO can I find a more appropriate place for this?
+	global headIo, piGpioInstance, headFromUprightU, headFromRetractedV, headRotation, headTouchoffV
+	
+	# note that the actual machine home will be in some random location — who knows where… TODO is this okay?
+	
+	write(headIo, "G93\r")	# G93 inverse time mode — homing & touchoff need this
+	write(headIo, "G91\r")	# G91 incremental distance mode (relative coords, because we don't necessarily know where we are in absolute coords)
+	
+	# assume U has been homed optically by the operator
+
+	# bring the head V axis home
+	extensionPerStep = -0.1	# TODO must match mechanical homing tolerance range
+	stepTime = 0.1
+	while PiGPIO.read(piGpioInstance, headHomePin)
+		rawHeadMovement(v=extensionPerStep, hduration=stepTime)
+	end
+
+	# there is no relevant home for the nozzle rotation R axis, so don't worry about it
+	# it'll just be zeroed in whatever position it's already in
+
+	# update current position on the machine
+	write(headIo, "G90\r")					# G90 absolute distance mode
+	write(headIo, "G10 L20 P1 X0 Y0 Z0\r")	# G10 L20 P1 rewrite G54 work coordinates to be X0 Y0 Z0 in current location
+	write(headIo, "G54\r")					# G54 use work coordinate system (the one we just configured)
+
+	# update the current position in our counters
+	headFromUprightU = 0.
+	headFromRetractedV = 0.
+	headRotation = 0.
+
+	# touch off to calculate and store max extension
 	touchoffHead()
-	# TODO review necessity of further moves
-	# sendMovementGcodes(u=????? no clue) TODO send help
+
+	# move to upright position
+	rawHeadMovement(v=0, hduration=2)
+	rawHeadMovement(u=head90degRotationU, hduration=2)
+	rawHeadMovement(v=headTouchoffV, hduration=2)
+
 end
 
 # send homing command
 function executeHomeGantry()
 	global gantryIo
 	write(gantryIo, "G28\n")
+	sleep(8) 					# TODO review
 end
 
 function executeMovement(m::StartupManoeuvres)
@@ -141,23 +230,41 @@ function executeMovement(m::StartupManoeuvres)
 end
 
 function executeMovement(m::HeadManoeuvres)
-	# TODO
-	# pretty much already got the code
-	# just switch on m == pick, m == place for vacuum
-	# also need to estimate the times
-	#? could G93 "Inverse Time" be useful? https://www.cnccookbook.com/feed-rate-mode-g-codes-g93-g94-and-g95/
-	#* need to do incremental head lowering with polling of nozzle cone! —> touchoffHead()
+	global headTouchoffV
+
+	# precompute next vac state while also checking for unimplemented errors
+	nextVacState = nothing
+	if m == pick nextVacState = suck
+	elseif m == place nextVacState = nosuck
+	else @error "Unimplemented"
+	end
+
+	rawHeadMovement(v=0, hduration=1)					# retract
+	rawHeadMovement(u=0, hduration=1)					# point downwards
+	touchoffHead()											# extend until contact with component
+	setVacuum(nextVacState)									# pick or place
+	rawHeadMovement(v=0, hduration=1)					# retract (lift)
+	rawHeadMovement(u=head90degRotationU, hduration=1) 	# lift back up
+	rawHeadMovement(v=headTouchoffV, hduration=1) 		# re-extend symmetrically to put into plane of focus
+
 end
 
 function executeMovement(m::ComponentMotion)
-	# TODO
-	# fairly simple, hopefully
-	# just make the move and estimate the time
+	global datumFromHomeX, datumFromHomeY, headRotation
+
+	tasks = [
+		@task rawGantryMovement(dx=m.dx, dy=m.dy)
+		@task rawHeadMovement(r=(headRotation += m.dr), hduration=(0.5*dr))	# TODO revise duration (feed rate) calculation
+	]
+
+	schedule.(tasks)
+	wait.(tasks)
+
 end
 
 function executeMovement(m::Nothing)
-	# stop errors
-	# sleep(0.1)	# ensure the thread yields to Julia's green threading
+	# nothing to do
+	# (sounds too much like the Canvas to-do page…)
 end
 
 # main loop for this
@@ -169,4 +276,4 @@ function movementsThread() while true
 
 end end
 
-@spawn movementsThread
+@spawn movementsThread()
