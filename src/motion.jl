@@ -51,7 +51,7 @@ end
 
 # driver code to send the required gcode
 # everything should have been bounds checked and accounted for by this point — all points relative to home coordinates
-function sendGcodes(; x=nothing, y=nothing, f1=600, u=nothing, v=nothing, r=nothing, f2=100)
+function sendMovementGcodes(; x=nothing, y=nothing, f1=600, u=nothing, v=nothing, r=nothing, f2=100)
 
 	# create strings
 	gantryString = "G1"
@@ -71,7 +71,7 @@ function sendGcodes(; x=nothing, y=nothing, f1=600, u=nothing, v=nothing, r=noth
 
 end
 
-# internal routines to do these things (and return the expected execution time)
+# internal routines to do these things (and block execution as the motion completes)
 # let Julia's dynamic dispatch paradigm do the hard work for us
 
 function executeHomeHead()
@@ -99,6 +99,7 @@ function executeMovement(m::HeadManoeuvres)
 	# just switch on m == pick, m == place for vacuum
 	# also need to estimate the times
 	#? could G93 "Inverse Time" be useful? https://www.cnccookbook.com/feed-rate-mode-g-codes-g93-g94-and-g95/
+	#* need to do incremental head lowering with polling of nozzle cone!
 end
 
 function executeMovement(m::ComponentMotion)
@@ -116,7 +117,7 @@ end
 
 function movementsThread() while true
 
-	@lock movementInProgressLock sleep(executeMovement(@lock nextMovementBeginLock nextMovement))
+	@lock movementInProgressLock executeMovement(@lock nextMovementBeginLock nextMovement)
 	sleep(0.1)
 
 end end
