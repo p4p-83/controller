@@ -3,7 +3,6 @@ using Base.Threads, HTTP.WebSockets, ProtoBuf
 mutable struct Calibration
 	x::Float32
 	y::Float32
-	z::Float32
 end
 
 # Assume that you can see 8x 10mm squares on the video feed.
@@ -12,7 +11,7 @@ end
 # To normalise into micrometres, we multiply this factor by (1000 um / 1 mm).
 # Therefore, a reasonable starting calibration is (80000 um / 65536).
 # calibration default: uh, they're empirical values
-calibration = Calibration(-1.0508553, 1.0789665, 0)
+calibration = Calibration(-1.0508553, 1.0789665)
 
 ########
 # PRIVATE HELPER METHODS
