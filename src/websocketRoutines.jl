@@ -1,4 +1,4 @@
-using Base.Threads
+using Base.Threads, HTTP.WebSockets, ProtoBuf
 
 mutable struct Calibration
 	x::Float32

@@ -1,7 +1,5 @@
 module Controller
 
-using HTTP.WebSockets, ProtoBuf, Crayons.Box
-
 # header code
 include("proto/pnp/v1/pnp.jl")
 
