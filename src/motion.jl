@@ -34,6 +34,8 @@ PiGPIO.set_mode(piGpioInstance, headHomePin, PiGPIO.INPUT)
 end
 
 @enum HeadManoeuvres begin
+	lower
+	raise
 	pick
 	place
 end
@@ -42,15 +44,16 @@ struct ComponentMotion
 	dx::Float64
 	dy::Float64
 	dr::Float64
+	ComponentMotion(;dx=0, dy=0, dr=0) = new(dx, dy, dr)
 end
 
 Movement = Union{StartupManoeuvres, HeadManoeuvres, ComponentMotion, Nothing}
 
+@enum VacuumStates suck nosuck
+
 ###################
 # MOVEMENT COORDINATION
 # movement is multithreaded
-
-movementInProgressLock = ReentrantLock()
 
 nextMovement::Union{ComponentMotion, Nothing} = nothing
 nextMovementBeginLock = ReentrantLock()
@@ -66,22 +69,16 @@ function setMovement(m::Movement)
 	@lock nextMovementBeginLock nextMovement = m
 end
 
-function setHeadHoldingTorque()
+function setHeadHoldingTorque(state::Bool)
 	global headIo
-	write(headIo, "\$1=255\r")
+	write(headIo, "\$1=$(state ? "255" : "254")\r")
+	rawHeadMovement(r=0.01, hduration=0.1)
 end
 
-@enum VacuumStates suck nosuck
 function setVacuum(s::VacuumStates)
 	global headIo
 	write(headIo, s == suck ? "M8\r" : "M9\r")
 end
-
-# TODO this ain't going to work
-# function awaitMovement()
-# 	lock(movementInProgressLock)
-# 	unlock(movementInProgressLock)
-# end
 
 ###################
 # MOVEMENT EXECUTION
@@ -143,9 +140,11 @@ end
 function rawHeadMovement(; u=nothing, v=nothing, r=nothing, hduration=1)
 	global headIo
 
+	gearRatio = 11 / 69.8 # TODO is this right
+
 	headGcodeString = "G1"
 	if !isnothing(u) headGcodeString *= " X$u" end
-	if !isnothing(v) headGcodeString *= " Y$v" end
+	if !isnothing(v) headGcodeString *= " Y$(v-gearRatio*u)" end	# TODO is gear ratio adjustment in the right direction?
 	if !isnothing(r) headGcodeString *= " Z$r" end
 	headGcodeString *= " F$(60/hduration)\r"			# inverse time feed rate is specified in min⁻¹
 
@@ -232,20 +231,34 @@ end
 function executeMovement(m::HeadManoeuvres)
 	global headTouchoffV
 
-	# precompute next vac state while also checking for unimplemented errors
-	nextVacState = nothing
-	if m == pick nextVacState = suck
-	elseif m == place nextVacState = nosuck
-	else @error "Unimplemented"
-	end
+	if m == lower
+		rawHeadMovement(v=0, hduration=1)					# retract
+		setFreezeFramed(true)
+		rawHeadMovement(u=0, hduration=1)					# point downwards
+		touchoffHead()										# extend until contact with component
+	
+	elseif m == raise
+		rawHeadMovement(v=0, hduration=1)					# retract (lift)
+		rawHeadMovement(u=head90degRotationU, hduration=1) 	# lift back up
+		setFreezeFramed(false)
+		rawHeadMovement(v=headTouchoffV, hduration=1) 		# re-extend symmetrically to put into plane of focus
+	
+	elseif m == pick
+		# re-use the above
+		executeMovement(lower)
+		setVacuum(suck)
+		executeMovement(raise)
+	
+	elseif m == place
+		# re-use the above
+		executeMovement(lower)
+		setVacuum(nosuck)
+		executeMovement(raise)
 
-	rawHeadMovement(v=0, hduration=1)					# retract
-	rawHeadMovement(u=0, hduration=1)					# point downwards
-	touchoffHead()											# extend until contact with component
-	setVacuum(nextVacState)									# pick or place
-	rawHeadMovement(v=0, hduration=1)					# retract (lift)
-	rawHeadMovement(u=head90degRotationU, hduration=1) 	# lift back up
-	rawHeadMovement(v=headTouchoffV, hduration=1) 		# re-extend symmetrically to put into plane of focus
+	else
+		@error "Unimplemented"
+
+	end
 
 end
 
@@ -255,6 +268,7 @@ function executeMovement(m::ComponentMotion)
 	tasks = [
 		@task rawGantryMovement(dx=m.dx, dy=m.dy)
 		@task rawHeadMovement(r=(headRotation += m.dr), hduration=(0.5*dr))	# TODO revise duration (feed rate) calculation
+		# TODO I probably should prevent wind-up on headRotation…
 	]
 
 	schedule.(tasks)
@@ -268,12 +282,13 @@ function executeMovement(m::Nothing)
 end
 
 # main loop for this
-
 function movementsThread() while true
+	global nextMovementBeginLock, nextMovement
 
-	@lock movementInProgressLock executeMovement(@lock nextMovementBeginLock nextMovement)
+	executeMovement(@lock nextMovementBeginLock nextMovement)
 	sleep(0.1)
 
 end end
 
-@spawn movementsThread()
+# run in background
+# @spawn movementsThread()
