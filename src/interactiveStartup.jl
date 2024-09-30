@@ -147,4 +147,4 @@ end
 #* ---> deal with new calibration data
 calibrations_downwardCameraDatum_norm .= downwardCameraDatum
 calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm .= upwardCameraDatum .- downwardCameraDatum
-# TODO Vision.setDatumOffset()
+Vision.setCompositingOffsets(calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm)
