@@ -41,13 +41,43 @@ end
 end
 
 struct ComponentMotion
-	dx::Float64
-	dy::Float64
-	dr::Float64
+	dx::Float64		# µm
+	dy::Float64		# µm
+	dr::Float64		# radians
+
 	ComponentMotion(;dx=0, dy=0, dr=0) = new(dx, dy, dr)
+
+	function ComponentMotion(ucm::UncalibratedComponentMotion)
+		global calibrations_cameraScale_µm_norm, calibrations_downwardCameraDatum_norm
+
+		targets_norm::Vector{Float64} = float.([ucm.targetx, ucm.targety])
+		deltas_norm::Vector{Float64} = targets_norm .- float.(calibrations_downwardCameraDatum_norm)
+		deltas_µm::Vector{Float64} = deltas_norm .* calibrations_cameraScale_µm_norm
+
+		new(deltas_µm[1], deltas_µm[2], ucm.dr)
+
+	end
+
 end
 
-Movement = Union{StartupManoeuvres, HeadManoeuvres, ComponentMotion, Nothing}
+struct UncalibratedComponentMotion
+
+	targetx::FI16	# normalised
+	targety::FI16	# normalised
+	dr::Float64		# radians
+
+	# from normalised types
+	UncalibratedComponentMotion(; targetx::FI16=0., targety::FI16=0., dr=0.) = new(targetx, targety, dr)
+
+	# from rescaled types
+	UncalibratedComponentMotion(; targetx::Int16=Int16(0), targety::Int16=Int16(0), dr=0.) = new(reinterpret(FI16, targetx), reinterpret(FI16, targety), dr)
+	
+	# # from all other types
+	# UncalibratedComponentMotion(; targetx=0., targety=0., dr=0.) = new(targetx, targety, dr)
+
+end
+
+Movement = Union{StartupManoeuvres, HeadManoeuvres, UncalibratedComponentMotion, ComponentMotion, Nothing}
 
 @enum VacuumStates suck nosuck
 
@@ -260,6 +290,10 @@ function executeMovement(m::HeadManoeuvres)
 
 	end
 
+end
+
+function executeMovement(m::UncalibratedComponentMotion)
+	executeMovement(ComponentMotion(m))
 end
 
 function executeMovement(m::ComponentMotion)

@@ -1,17 +1,4 @@
-using Base.Threads, HTTP.WebSockets, ProtoBuf
-
-mutable struct Calibration
-	x::Float32
-	y::Float32
-end
-
-# Assume that you can see 8x 10mm squares on the video feed.
-# This means that [0, 65536] maps into [0mm, 80mm].
-# Therefore, to denormalise into millimetres, we must multiply received deltas by (80 mm / 65536).
-# To normalise into micrometres, we multiply this factor by (1000 um / 1 mm).
-# Therefore, a reasonable starting calibration is (80000 um / 65536).
-# calibration default: uh, they're empirical values
-calibration = Calibration(-1.0508553, 1.0789665)
+using HTTP.WebSockets, ProtoBuf
 
 ########
 # PRIVATE HELPER METHODS
@@ -36,7 +23,7 @@ end
 
 # CALIBRATE_DELTAS
 function handleWsCalibrateDeltas(message.payload)
-	global calibration
+	global calibrations_cameraScale_µm_norm
 
 	if payload.name !== :calibration
 		# println("Missing calibration!", payload)
@@ -46,10 +33,12 @@ function handleWsCalibrateDeltas(message.payload)
 	println("Target deltas: ", payload[].target)
 	println("Real deltas: ", payload[].real)
 
-	println("Current calibration is $(calibration)")
+	println("Current calibration is $(calibrations_cameraScale_µm_norm)")
 
-	calibration.x = calibration.x / (1 - (payload[].real.x / payload[].target.x))
-	calibration.y = calibration.y / (1 - (payload[].real.y / payload[].target.y))
+	r = [payload[].real.x, payload[].real.y]
+	t = [payload[].target.x, payload[].target.y]
+
+	@. calibrations_cameraScale_µm_norm /= 1 - (r / t)
 
 	println("Calibrated to $(calibration)")
 
@@ -70,10 +59,7 @@ function handleWsGantryMovementRequest(socket, payload)
 	# println("Gantry currently at $(gantry.position)")
 	# println("Calibration is currently $(calibration)")
 
-	executeMovement(ComponentMotion(
-		dx=(payload[].x * calibration.x),
-		dy=(payload[].y * calibration.y)
-	))
+	executeMovement(UncalibratedComponentMotion(targetx=payload[].x, targety=payload[].y))
 
 	# acknowledge movement
 	sendMessageToFrontend(socket, pnp.v1.Message(
@@ -179,6 +165,38 @@ function handleFrontEndCommand(socket::WebSocket, data::AbstractArray{UInt8})
 
 end
 
+function handleFrontEndCommandDuringInteractiveStartup(socket::WebSocket, data::AbstractArray{UInt8})
+
+	decoder = ProtoDecoder(IOBuffer(data))
+	message = decode(decoder, pnp.v1.Message)
+
+	if isnothing(message) return end
+
+	Tags = pnp.v1.var"Message.Tags"
+	tag::Tags = message.tag
+	payload = message.payload
+
+	if tag == Tags.TARGET_DELTAS
+
+		if payload.name !== :deltas
+			return
+		end
+
+		interactiveStartupNoteLatestClickTarget(reinterpret(FI16, payload[].x), reinterpret(FI16, payload[].y))
+
+		# leave on screen?
+		# sendMessageToFrontend(socket, pnp.v1.Message(
+		# 	pnp.v1.var"Message.Tags".MOVED_DELTAS,
+		# 	OneOf(
+		# 		:deltas,
+		# 		pnp.v1.var"Message.Deltas"(payload[].x, payload[].y)
+		# 	)
+		# ))
+
+	end
+
+end
+
 function sendCentroidsToFrontend(socket)
 	
 	snapPositions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in Vision.getCentroidsNorm(1)]
@@ -200,12 +218,20 @@ end
 sendCentroidsDownSockets::Bool = false
 sendCentroidsDownSocketsLock::ReentrantLock = ReentrantLock()
 
+interactiveStartupMode::Bool = false
+interactiveStartupModeLock::ReentrantLock = ReentrantLock()
+
 function enableDisableCentroidSending(enable::Bool)
 	@lock sendCentroidsDownSocketsLock sendCentroidsDownSockets = enable
 end
 
+function enableDisableInteractiveStartupMode(enable::Bool)
+	@lock interactiveStartupModeLock interactiveStartupMode = enable
+end
+
 function handleWebSocketConnection(socket)
 	global sendCentroidsDownSockets, sendCentroidsDownSocketsLock
+	global interactiveStartupMode, interactiveStartupModeLock
 	
 	isSocketAlive::Bool = true
 	isSocketAliveLock::ReentrantLock = ReentrantLock()
@@ -217,7 +243,11 @@ function handleWebSocketConnection(socket)
 	
 	# keeps iterating until socket closes
 	for data in socket
-		handleFrontEndCommand(socket, data)
+		if @lock interactiveStartupModeLock interactiveStartupMode
+			handleFrontEndCommandDuringInteractiveStartup(socket, data)
+		else
+			handleFrontEndCommand(socket, data)
+		end
 	end
 
 	# kill the process — socket closed

@@ -74,9 +74,19 @@ You should see an image of the nozzle. Please click the centre of the nozzle as 
 You get multiple attempts (so you can use the circle to visualise the accuracy). Press enter when you're happy to lock it in.
 """)
 
-# TODO cache clicks
+upwardCameraDatum::Vector{FI16} = [0., 0.]
+upwardCameraDatumLock::ReentrantLock = ReentrantLock()
 
+function interactiveStartupNoteLatestClickTarget(x::FI16, y::FI16)
+	global upwardCameraDatumLock, upwardCameraDatumX, upwardCameraDatumY
+	lock(upwardCameraDatumLock)
+	upwardCameraDatum .= [x, y]
+	unlock(upwardCameraDatumLock)
+end
+
+enableDisableInteractiveStartupMode(true)
 readline()
+enableDisableInteractiveStartupMode(false)
 
 #* ---> have user click downwards feed
 
@@ -90,16 +100,26 @@ Please identify the reference mark that you selected before (the point over whic
 Same as before, you can click as many times as you need. Press enter when you're satisfied.
 """)
 
-# TODO cache clicks
+downwardCameraDatum::Vector{FI16} = [0., 0.]
+downwardCameraDatumLock::ReentrantLock = ReentrantLock()
 
+function interactiveStartupNoteLatestClickTarget(x::FI16, y::FI16)
+	global downwardCameraDatumLock, downwardCameraDatumX, downwardCameraDatumY
+	lock(downwardCameraDatumLock)
+	downwardCameraDatum .= [x, y]
+	unlock(downwardCameraDatumLock)
+end
+
+enableDisableInteractiveStartupMode(true)
 readline()
+enableDisableInteractiveStartupMode(false)
 
 #* ---> power on & home the gantry
 
 println("""
 You've now finished aligning the head. The next step is to home the gantry.
 
-Before homing the gantry, make sure there is adequate clearance for the second camera to protrude behind the machine!
+Before homing the gantry, make sure there is adequate clearance for the second camera behind the machine!
 
 Also note that sometimes the gantry will home itself after you flick the switch — don't panic if it moves on its own accord here; that's fine.
 
@@ -123,3 +143,8 @@ Note that if you experience issues while placing parts with the gantry moving to
 """)
 
 end
+
+#* ---> deal with new calibration data
+calibrations_downwardCameraDatum_norm .= downwardCameraDatum
+calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm .= upwardCameraDatum .- downwardCameraDatum
+# TODO Vision.setDatumOffset()
