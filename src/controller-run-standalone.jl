@@ -4,7 +4,7 @@ import .Controller
 using Crayons.Box, DataFrames
 function printCentroidsToStdOut()
 
-	leads, pads = Controller.Vision.getCentroids()
+	leads, pads = Controller.Vision.getCentroids([2, 1])
 
 	println("\n\n\nLeads" |> BOLD |> GREEN_FG)
 	display(DataFrame(leads))

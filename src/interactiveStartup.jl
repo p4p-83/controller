@@ -148,9 +148,15 @@ The gantry is now homed in. That's all the setup needed for the mechanical and o
 Note that if you experience issues while placing parts with the gantry moving too far, not far enough, or even in the wrong direction, you can (re)calibrate the movements using the /calibrate page. (But you shouldn't have to worry about this if your're using a standard-height PCB with the normal clips.)
 """)
 
-end
-
 #* ---> deal with new calibration data
 calibrations_downwardCameraDatum_norm .= downwardCameraDatum
 calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm .= upwardCameraDatum .- downwardCameraDatum
 Vision.setCompositingOffsets(calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm)
+
+
+
+
+
+
+
+end	# end function interactiveStartup()
