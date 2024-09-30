@@ -74,6 +74,8 @@ You should see an image of the nozzle. Please click the centre of the nozzle as 
 You get multiple attempts (so you can use the circle to visualise the accuracy). Press enter when you're happy to lock it in.
 """)
 
+Vision.setCompositingMode(Vision.CompositingModes.ONLYUP)
+
 upwardCameraDatum::Vector{FI16} = [0., 0.]
 upwardCameraDatumLock::ReentrantLock = ReentrantLock()
 
@@ -100,6 +102,8 @@ Please identify the reference mark that you selected before (the point over whic
 Same as before, you can click as many times as you need. Press enter when you're satisfied.
 """)
 
+Vision.setCompositingMode(Vision.CompositingModes.ONLYDOWN)
+
 downwardCameraDatum::Vector{FI16} = [0., 0.]
 downwardCameraDatumLock::ReentrantLock = ReentrantLock()
 
@@ -125,6 +129,8 @@ Also note that sometimes the gantry will home itself after you flick the switch 
 
 Please flick the switch on the gantry controller to re-enable holding torque (and motion). Press enter when you've done this.
 """)
+
+Vision.setCompositingMode(Vision.CompositingModes.NORMAL)
 
 readline()
 

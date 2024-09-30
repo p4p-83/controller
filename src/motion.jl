@@ -263,14 +263,14 @@ function executeMovement(m::HeadManoeuvres)
 
 	if m == lower
 		rawHeadMovement(v=0, hduration=1)					# retract
-		setFreezeFramed(true)
+		setCompositingMode(CompositingModes.FROZEN)
 		rawHeadMovement(u=0, hduration=1)					# point downwards
 		touchoffHead()										# extend until contact with component
 	
 	elseif m == raise
 		rawHeadMovement(v=0, hduration=1)					# retract (lift)
 		rawHeadMovement(u=head90degRotationU, hduration=1) 	# lift back up
-		setFreezeFramed(false)
+		setCompositingMode(CompositingModes.NORMAL)
 		rawHeadMovement(v=headTouchoffV, hduration=1) 		# re-extend symmetrically to put into plane of focus
 	
 	elseif m == pick
