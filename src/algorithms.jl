@@ -49,7 +49,8 @@ function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, select
 	binOrdering = sortperm(bins, rev=true)
 	rankedAngles = binLabels[binOrdering]
 
-	return CompoundMovement.(ArbitraryRotation.(rankedAngles[1:5], reference))
+	# return CompoundMovement.(ArbitraryRotation.(rankedAngles[1:5], reference))
+	return UncalibratedArbitraryMotion.(rotation=rankedAngles[1:5], centreOfRotation=[reim(reference)...])
 
 	# if the desired centre of rotation isn't the actual centre of rotation of the nozzle, it will move
 	# calculate the required translation to "catch" it
@@ -61,7 +62,8 @@ end
 
 function wick(leads, pads)
 
-	totalMovement = CompoundMovement(0.0+0.0j, 0.0)
+	# totalMovement = CompoundMovement(0.0+0.0j, 0.0)
+	cvMotion = UncalibratedArbitraryMotion()
 
 	# STEP 0 — PREPARATION
 	# find corresponding pad for each lead
@@ -81,7 +83,9 @@ function wick(leads, pads)
 	meanMovement = mean(movements)
 	pads .-= meanMovement
 	# trackedTranslation += meanMovement
-	totalMovement += CompoundMovement(meanMovement)
+	# totalMovement += CompoundMovement(meanMovement)
+
+	cvMotion.translation = [reim(meanMovement)...]
 
 	movements = leads.-pads[mapping]	#? do I still need these?
 	meanMovement = mean(movements)
@@ -93,9 +97,14 @@ function wick(leads, pads)
 	# calculate rotational correction
 	subtendedAngles = angle.(pads[mapping].-centreOfRotation) .- angle.(leads.-centreOfRotation)
 	meanRotation = mean(subtendedAngles)
-	totalMovement += CompoundMovement(ArbitraryRotation(meanRotation, centreOfRotation))
+	# totalMovement += CompoundMovement(ArbitraryRotation(meanRotation, centreOfRotation))
 
-	return totalMovement
+	cvMotion.rotation = meanRotation
+	cvMotion.centreOfRotation = [reim(centreOfRotation)...]
+
+	return cvMotion
+
+	# return totalMovement
 
 	# # if the desired centre of rotation isn't the actual centre of rotation of the nozzle, it will move
 	# # calculate the required translation to "catch" it

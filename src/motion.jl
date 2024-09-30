@@ -43,7 +43,7 @@ end
 struct ComponentMotion
 	dx::Float64		# µm
 	dy::Float64		# µm
-	dr::Float64		# radians
+	dr::Float64		#! in revolutions (i.e. 0.25 would represent 90°)
 
 	ComponentMotion(;dx=0, dy=0, dr=0) = new(dx, dy, dr)
 
@@ -58,13 +58,32 @@ struct ComponentMotion
 
 	end
 
+	function ComponentMotion(am::UncalibratedArbitraryMotion)
+		global calibrations_cameraScale_µm_norm, calibrations_downwardCameraDatum_norm
+		
+		nominalTranslation_norm = float.(am.target) .- float.(calibrations_downwardCameraDatum_norm)
+		centreOfRotation_norm = float.(am.centreOfRotation) .- float.(calibrations_downwardCameraDatum_norm)
+		rotation_rad = am.rotation
+
+		rotate(p, θ) = [cos(θ) -sin(θ) ; sin(θ) cos(θ)] * p
+		centreOfRotationAfterRotationAboutDatum_norm = rotate(centreOfRotation_norm, rotation_rad)
+		correctiveTranslation_norm = centreOfRotation_norm .- centreOfRotationAfterRotationAboutDatum_norm
+
+		translation_norm = nominalTranslation_norm .+ correctiveTranslation_norm
+
+		deltas_µm = translation_norm .* calibrations_cameraScale_µm_norm
+
+		new(deltas_µm[1], deltas_µm[2], rotation_rad/2π)
+
+	end
+
 end
 
 struct UncalibratedComponentMotion
 
 	targetx::FI16	# normalised
 	targety::FI16	# normalised
-	dr::Float64		# radians
+	dr::Float64		#! revolutions
 
 	# from normalised types
 	UncalibratedComponentMotion(; targetx::FI16=0., targety::FI16=0., dr=0.) = new(targetx, targety, dr)
@@ -75,6 +94,14 @@ struct UncalibratedComponentMotion
 	# # from all other types
 	# UncalibratedComponentMotion(; targetx=0., targety=0., dr=0.) = new(targetx, targety, dr)
 
+end
+
+mutable struct UncalibratedArbitraryMotion
+	# stores information about a virtual centre of rotation
+	target::Vector{FI16}				# in normalised image units [-0.5, 0.5) 
+	rotation::Float64					#! in radians
+	centreOfRotation::Vector{FI16}		# in normalised image units
+	UncalibratedArbitraryMotion(; target::Vector{FI16}=[0.,0.], rotation=0., centreOfRotation::Vector{FI16}=[0.,0.]) = new(target, rotation, centreOfRotation)
 end
 
 Movement = Union{StartupManoeuvres, HeadManoeuvres, UncalibratedComponentMotion, ComponentMotion, Nothing}

@@ -199,7 +199,7 @@ end
 
 function sendCentroidsToFrontend(socket)
 	
-	snapPositions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in Vision.getCentroidsNorm(1)]
+	snapPositions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in Vision.getCentroidsRescaled(1)]
 
 	sendMessageToFrontend(socket, pnp.v1.Message(
 		pnp.v1.var"Message.Tags".TARGET_POSITIONS,

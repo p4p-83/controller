@@ -25,6 +25,7 @@ calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm::Vector{FI16} = [0., 0
 
 # body code
 include("motion.jl")
+include("algorithms.jl")
 include("websocketRoutines.jl")
 include("interactiveStartup.jl")
 
