@@ -4,6 +4,10 @@ function interactiveStartup()
 
 #* --> preparation
 
+println("""
+Welcome to the interactive startup for the controller.
+""")
+
 WebSockets.listen(handleWebSocketConnection, "0.0.0.0", "8080")
 
 #* --> all things off
