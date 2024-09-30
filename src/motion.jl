@@ -20,7 +20,8 @@ setGpio(headHomePin, dir=INPUT, pull=PULL_UP)
 # instances
 const gantryIo::LibSerialPort.SerialPort = open("/dev/ttyUSB0", 115200)
 const headIo::LibSerialPort.SerialPort = open("/dev/ttyACM0", 115200)
-
+# const gantryIo = open("/dev/null", "w+")	#! so that Sam can test from home without crashing things
+# const headIo = open("/dev/null", "w+")
 
 ###################
 # CALIBRATION FUNCTIONS
@@ -104,9 +105,10 @@ function setMovement(m::Movement)
 end
 
 function setHeadHoldingTorque(state::Bool)
+	@info "$(state ? "enabling" : "disabling") head holding torque"
 	global headIo
 	write(headIo, "\$1=$(state ? "255" : "254")\r")
-	rawHeadMovement(r=0.01, hduration=0.1)
+	rawHeadMovement(r=0, hduration=0.1)
 end
 
 function setVacuum(s::VacuumStates)
@@ -132,7 +134,7 @@ const headMaxExtensionV::Float64 = 1.8	# head, hard limit on head extension
 function rawGantryMovement(; dx=0, dy=0)
 	global datumFromHomeX, datumFromHomeY, gantryIo
 
-	gantryFeedrate = 10		# √(x^2 + y^2) units per second
+	gantryFeedrate = 10000			# √(dx^2 + dy^2) units per second
 	
 	# TODO measure and set these
 	# mostly here to prevent head crashes, but they also prevent a certain spastic bug in the gantry controller from manifesting
@@ -161,6 +163,8 @@ function rawGantryMovement(; dx=0, dy=0)
 	datumFromHomeX = nextDatumFromHomeX
 	datumFromHomeY = nextDatumFromHomeY
 
+	@info "moving gantry to ($datumFromHomeX, $datumFromHomeY)"
+
 	# dispatch movement
 	write(gantryIo, "G1 X$datumFromHomeX Y$datumFromHomeY\n")
 
@@ -174,20 +178,30 @@ end
 function rawHeadMovement(; u=nothing, v=nothing, r=nothing, hduration=1)
 	global headIo, headFromUprightU, headFromRetractedV, headRotation
 
-	gearRatio = 11 / 69.8 # TODO is this right
+	gearRatio = 11 / 69.8 							# TODO is this right?
 
-	headGcodeString = "G1"
-	if !isnothing(u) headGcodeString *= " X$u" end
-	if !isnothing(v) headGcodeString *= " Y$(v-gearRatio*u)" end	# TODO is gear ratio adjustment in the right direction?
-	if !isnothing(r) headGcodeString *= " Z$r" end
-	headGcodeString *= " F$(60/hduration)\r"			# inverse time feed rate is specified in min⁻¹
+	headGcodeString =  "G1"
 
+	targetV = !isnothing(v) ? v : headFromRetractedV
+	headFromRetractedV = targetV
+
+	if !isnothing(u)
+		headGcodeString *= " X$u"
+		headFromUprightU = u
+		targetV -= gearRatio*headFromUprightU		# parasitic component of u in v axis # TODO is gear ratio adjustment in the right direction?
+	end
+
+	headGcodeString *= " Y$targetV"
+
+	if !isnothing(r)
+		headGcodeString *= " Z$r"
+		headRotation = r
+	end
+
+	headGcodeString *= " F$(60/hduration)\r"		# inverse time feed rate is specified in min⁻¹
+
+	@info "moving head to $headFromUprightU $headFromRetractedV $(float(headRotation))"
 	write(headIo, headGcodeString)
-
-	headFromUprightU = u
-	headFromRetractedV = v
-	headRotation = r
-
 	sleep(hduration)
 
 end
@@ -199,14 +213,14 @@ end
 function touchoffHead()
 	global headFromRetractedV, headTouchoffV, piGpioInstance
 
-	extensionPerStep = 0.4
+	extensionPerStep = 0.1
 	stepTime = 0.1 			# seconds
 
 	for v in range(headFromRetractedV, headMaxExtensionV, step=extensionPerStep)
 
 		rawHeadMovement(v=v, hduration=stepTime)				# make a step
 		headTouchoffV = v										# save position as touch-off location in case we break	
-		if !readGpio(coneLimitPin) break end						# stop if we've arrived
+		if readGpio(coneLimitPin) break end						# stop if we've arrived
 			# TODO polarity
 
 	end
@@ -226,7 +240,10 @@ function executeHomeHead()
 	# bring the head V axis home
 	extensionPerStep = -0.1	# TODO must match mechanical homing tolerance range
 	stepTime = 0.1
-	while readGpio(headHomePin)	# TODO assumes NC switch w/ pull up
+
+	for _ in 1:(3÷abs(extensionPerStep))
+		# cap the travel
+		if !readGpio(headHomePin) break end # TODO assumes NC switch w/ pull up
 		rawHeadMovement(v=extensionPerStep, hduration=stepTime)
 	end
 
@@ -263,7 +280,7 @@ end
 function executeMovement(m::StartupManoeuvres)
 	# two quite different options for a StartupManoeuvre — delegate to more specific functions
 	if m == homeHead return executeHomeHead()
-	elseif m == homeHead return executeHomeGantry()
+	elseif m == homeGantry return executeHomeGantry()
 	else @error "Unimplemented"
 	end
 end
@@ -308,6 +325,8 @@ end
 
 function executeMovement(m::ComponentMotion)
 	global datumFromHomeX, datumFromHomeY, headRotation
+	
+	@info "excuting movement"
 
 	tasks = [
 		@task rawGantryMovement(dx=m.dx, dy=m.dy)
@@ -315,8 +334,10 @@ function executeMovement(m::ComponentMotion)
 		# TODO I probably should prevent wind-up on headRotation…
 	]
 
+	@info "waiting"
 	schedule.(tasks)
 	wait.(tasks)
+	@info "done waiting"
 
 end
 
@@ -335,4 +356,5 @@ function movementsThread() while true
 end end
 
 # run in background
-# @spawn movementsThread()
+# // @spawn movementsThread()
+# gave up on this — easier to just call the movements directly and block whatever thread is running them directly

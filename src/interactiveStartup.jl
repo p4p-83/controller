@@ -8,7 +8,7 @@ println("""
 Welcome to the interactive startup for the controller.
 """)
 
-WebSockets.listen(handleWebSocketConnection, "0.0.0.0", "8080")
+@spawn WebSockets.listen(handleWebSocketConnection, "0.0.0.0", 8080)
 
 #* --> all things off
 
@@ -83,16 +83,53 @@ Vision.setCompositingMode(Vision.CompositingModes.ONLYUP)
 upwardCameraDatum::Vector{FI16} = [0., 0.]
 upwardCameraDatumLock::ReentrantLock = ReentrantLock()
 
-function interactiveStartupNoteLatestClickTarget(x::FI16, y::FI16)
-	global upwardCameraDatumLock, upwardCameraDatumX, upwardCameraDatumY
-	lock(upwardCameraDatumLock)
-	upwardCameraDatum .= [x, y]
-	unlock(upwardCameraDatumLock)
+# helper fn
+# a bit awkward having it here, but … what do
+# run out of refactoring time
+function onlyIfTargetDeltas(fn::Function, socket, data)
+	
+	decoder = ProtoDecoder(IOBuffer(data))
+	message = decode(decoder, pnp.v1.Message)
+
+	if isnothing(message) return end
+
+	Tags = pnp.v1.var"Message.Tags"
+	tag::Tags = message.tag
+	payload = message.payload
+
+	if tag == Tags.TARGET_DELTAS
+
+		if payload.name !== :deltas
+			return
+		end
+
+		fn(reinterpret(FI16, payload[].x), reinterpret(FI16, payload[].y))
+
+		# leave on screen?
+		# sendMessageToFrontend(socket, pnp.v1.Message(
+		# 	pnp.v1.var"Message.Tags".MOVED_DELTAS,
+		# 	OneOf(
+		# 		:deltas,
+		# 		pnp.v1.var"Message.Deltas"(payload[].x, payload[].y)
+		# 	)
+		# ))
+
+	end
+
 end
 
-enableDisableInteractiveStartupMode(true)
+overrideFrontendCommandHandler() do socket, data
+	onlyIfTargetDeltas(socket, data) do x::FI16, y::FI16
+		global upwardCameraDatumLock, upwardCameraDatumX, upwardCameraDatumY
+		lock(upwardCameraDatumLock)
+		upwardCameraDatum .= [x, y]
+		unlock(upwardCameraDatumLock)
+	end
+end
+
 readline()
-enableDisableInteractiveStartupMode(false)
+
+overrideFrontendCommandHandler(nothing)
 
 #* ---> have user click downwards feed
 
@@ -111,16 +148,18 @@ Vision.setCompositingMode(Vision.CompositingModes.ONLYDOWN)
 downwardCameraDatum::Vector{FI16} = [0., 0.]
 downwardCameraDatumLock::ReentrantLock = ReentrantLock()
 
-function interactiveStartupNoteLatestClickTarget(x::FI16, y::FI16)
-	global downwardCameraDatumLock, downwardCameraDatumX, downwardCameraDatumY
-	lock(downwardCameraDatumLock)
-	downwardCameraDatum .= [x, y]
-	unlock(downwardCameraDatumLock)
+overrideFrontendCommandHandler() do socket, data
+	onlyIfTargetDeltas(socket, data) do x::FI16, y::FI16
+		global downwardCameraDatumLock, downwardCameraDatumX, downwardCameraDatumY
+		lock(downwardCameraDatumLock)
+		downwardCameraDatum .= [x, y]
+		unlock(downwardCameraDatumLock)
+	end
 end
 
-enableDisableInteractiveStartupMode(true)
 readline()
-enableDisableInteractiveStartupMode(false)
+
+overrideFrontendCommandHandler(nothing)
 
 #* ---> power on & home the gantry
 
@@ -157,10 +196,9 @@ calibrations_downwardCameraDatum_norm .= downwardCameraDatum
 calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm .= upwardCameraDatum .- downwardCameraDatum
 Vision.setCompositingOffsets(calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm)
 
-
-
-
-
-
+println("""
+Ready to go.
+Please use /place in the web browser to populate your PCB!
+""")
 
 end	# end function interactiveStartup()

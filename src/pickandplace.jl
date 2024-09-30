@@ -10,7 +10,4 @@ Press enter to continue.
 
 readline()
 
-println("""
-Setting up the web server…
-""")
 

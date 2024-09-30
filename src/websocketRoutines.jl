@@ -22,7 +22,7 @@ function handleWsHeartbeat(socket::WebSocket)
 end
 
 # CALIBRATE_DELTAS
-function handleWsCalibrateDeltas(message.payload)
+function handleWsCalibrateDeltas(payload)
 	global calibrations_cameraScale_µm_norm
 
 	if payload.name !== :calibration
@@ -73,7 +73,7 @@ function handleWsGantryMovementRequest(socket, payload)
 end
 
 # OPERATE_HEAD
-function handleWsHeadMovementRequest(message.payload)
+function handleWsHeadMovementRequest(payload)
 	
 	if payload.name !== :headOperation
 		println("Missing head operation!", payload)
@@ -110,7 +110,7 @@ function handleWsHeadMovementRequest(message.payload)
 end
 
 # ROTATE_NOZZLE
-function handleWsNozzleRotationRequest(message.payload)
+function handleWsNozzleRotationRequest(payload)
 
 	if payload.name !== :nozzleRotation
 		println("Missing nozzle rotation!", payload)
@@ -124,7 +124,7 @@ function handleWsNozzleRotationRequest(message.payload)
 end
 
 # STEP_GANTRY
-function handleWsHomingRequest(message.payload)
+function handleWsHomingRequest(payload)
 
 	if payload.name !== :step
 		println("Missing step!", payload)
@@ -153,49 +153,50 @@ function handleFrontEndCommand(socket::WebSocket, data::AbstractArray{UInt8})
 
 	Tags = pnp.v1.var"Message.Tags"
 	tag::Tags = message.tag
+	payload = message.payload
 
 	if tag == Tags.HEARTBEAT 				handleWsHeartbeat(socket)
-	elseif tag == Tags.CALIBRATE_DELTAS		handleWsCalibrateDeltas(message.payload)
-	elseif tag == Tags.TARGET_DELTAS 		handleWsGantryMovementRequest(socket, message.payload)
-	elseif tag == Tags.OPERATE_HEAD			handleWsHeadMovementRequest(message.payload)
-	elseif tag == Tags.ROTATE_NOZZLE		handleWsNozzleRotationRequest(message.payload)
-	elseif tag == Tags.STEP_GANTRY			handleWsHomingRequest(message.payload)
+	elseif tag == Tags.CALIBRATE_DELTAS		handleWsCalibrateDeltas(payload)
+	elseif tag == Tags.TARGET_DELTAS 		handleWsGantryMovementRequest(socket, payload)
+	elseif tag == Tags.OPERATE_HEAD			handleWsHeadMovementRequest(payload)
+	elseif tag == Tags.ROTATE_NOZZLE		handleWsNozzleRotationRequest(payload)
+	elseif tag == Tags.STEP_GANTRY			handleWsHomingRequest(payload)
 	else 									@error "Unimplemented"
 	end
 
 end
 
-function handleFrontEndCommandDuringInteractiveStartup(socket::WebSocket, data::AbstractArray{UInt8})
+# function handleFrontEndCommandDuringInteractiveStartup(socket::WebSocket, data::AbstractArray{UInt8})
 
-	decoder = ProtoDecoder(IOBuffer(data))
-	message = decode(decoder, pnp.v1.Message)
+# 	decoder = ProtoDecoder(IOBuffer(data))
+# 	message = decode(decoder, pnp.v1.Message)
 
-	if isnothing(message) return end
+# 	if isnothing(message) return end
 
-	Tags = pnp.v1.var"Message.Tags"
-	tag::Tags = message.tag
-	payload = message.payload
+# 	Tags = pnp.v1.var"Message.Tags"
+# 	tag::Tags = message.tag
+# 	payload = message.payload
 
-	if tag == Tags.TARGET_DELTAS
+# 	if tag == Tags.TARGET_DELTAS
 
-		if payload.name !== :deltas
-			return
-		end
+# 		if payload.name !== :deltas
+# 			return
+# 		end
 
-		interactiveStartupNoteLatestClickTarget(reinterpret(FI16, payload[].x), reinterpret(FI16, payload[].y))
+# 		interactiveStartupNoteLatestClickTarget(reinterpret(FI16, payload[].x), reinterpret(FI16, payload[].y))
 
-		# leave on screen?
-		# sendMessageToFrontend(socket, pnp.v1.Message(
-		# 	pnp.v1.var"Message.Tags".MOVED_DELTAS,
-		# 	OneOf(
-		# 		:deltas,
-		# 		pnp.v1.var"Message.Deltas"(payload[].x, payload[].y)
-		# 	)
-		# ))
+# 		# leave on screen?
+# 		# sendMessageToFrontend(socket, pnp.v1.Message(
+# 		# 	pnp.v1.var"Message.Tags".MOVED_DELTAS,
+# 		# 	OneOf(
+# 		# 		:deltas,
+# 		# 		pnp.v1.var"Message.Deltas"(payload[].x, payload[].y)
+# 		# 	)
+# 		# ))
 
-	end
+# 	end
 
-end
+# end
 
 function sendCentroidsToFrontend(socket)
 	
@@ -218,39 +219,44 @@ end
 sendCentroidsDownSockets::Bool = false
 sendCentroidsDownSocketsLock::ReentrantLock = ReentrantLock()
 
-interactiveStartupMode::Bool = false
-interactiveStartupModeLock::ReentrantLock = ReentrantLock()
+frontendCommandHandler::Function = handleFrontEndCommand
+frontendCommandHandlerLock::ReentrantLock = ReentrantLock() 
+
+# useful for interactive startup
+# call with (nothing) to reset / restore default
+function overrideFrontendCommandHandler(overrideFn::Union{Function, Nothing})
+	lock(frontendCommandHandlerLock)
+	
+	if isnothing(overrideFn) frontendCommandHandler = handleFrontEndCommand
+	else frontendCommandHandler = overrideFn
+	end
+	
+	unlock(frontendCommandHandlerLock)
+end
 
 function enableDisableCentroidSending(enable::Bool)
 	global sendCentroidsDownSockets, sendCentroidsDownSocketsLock
 	@lock sendCentroidsDownSocketsLock sendCentroidsDownSockets = enable
 end
 
-function enableDisableInteractiveStartupMode(enable::Bool)
-	global interactiveStartupMode, interactiveStartupModeLock
-	@lock interactiveStartupModeLock interactiveStartupMode = enable
-end
-
 function handleWebSocketConnection(socket)
-	global sendCentroidsDownSockets, sendCentroidsDownSocketsLock
-	global interactiveStartupMode, interactiveStartupModeLock
-	global isSocketAlive, isSocketAliveLock
+	global sendCentroidsDownSocketsLock, sendCentroidsDownSockets
+	global frontendCommandHandlerLock, frontendCommandHandler
 	
 	isSocketAlive::Bool = true
 	isSocketAliveLock::ReentrantLock = ReentrantLock()
 
 	@spawn while @lock isSocketAliveLock isSocketAlive
-		if @lock sendCentroidsDownSocketsLock sendCentroidsDownSockets sendCentroidsToFrontend(socket) end
+		# local socket, isSocketAlive, isSocketAliveLock
+		scds = @lock sendCentroidsDownSocketsLock sendCentroidsDownSockets
+		if scds sendCentroidsToFrontend(socket) end
 		sleep(0.5)
 	end
 	
 	# keeps iterating until socket closes
 	for data in socket
-		if @lock interactiveStartupModeLock interactiveStartupMode
-			handleFrontEndCommandDuringInteractiveStartup(socket, data)
-		else
-			handleFrontEndCommand(socket, data)
-		end
+		fech = @lock frontendCommandHandlerLock frontendCommandHandler
+		fech(socket, data)
 	end
 
 	# kill the process — socket closed
