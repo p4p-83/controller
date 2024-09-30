@@ -26,6 +26,19 @@ PiGPIO.set_mode(piGpioInstance, headHomePin, PiGPIO.INPUT)
 # PiGPIO.set_pull_up_down(piGpioInstance, headHomePin, PiGPIO.PUD_UP) # TODO review
 
 ###################
+# CALIBRATION FUNCTIONS
+
+function normedPixelsToMicrometres(xy::Vector{FI16})::Vector{Float64}
+	global calibrations_cameraScale_µm_norm, calibrations_downwardCameraDatum_norm
+	return @. (float(xy) - float(calibrations_downwardCameraDatum_norm)) * calibrations_cameraScale_µm_norm
+end
+
+function micrometresToNormedPixels(dxdy::Vector{Float64})::Vector{FI16}
+	global calibrations_cameraScale_µm_norm, calibrations_downwardCameraDatum_norm
+	return @. FI16(dxdy/calibrations_cameraScale_µm_norm) + calibrations_downwardCameraDatum_norm
+end
+
+###################
 # TYPES TO REPRESENT MOVEMENTS
 
 @enum StartupManoeuvres begin
@@ -48,34 +61,28 @@ struct ComponentMotion
 	ComponentMotion(;dx=0, dy=0, dr=0) = new(dx, dy, dr)
 
 	function ComponentMotion(ucm::UncalibratedComponentMotion)
-		global calibrations_cameraScale_µm_norm, calibrations_downwardCameraDatum_norm
-
-		targets_norm::Vector{Float64} = float.([ucm.targetx, ucm.targety])
-		deltas_norm::Vector{Float64} = targets_norm .- float.(calibrations_downwardCameraDatum_norm)
-		deltas_µm::Vector{Float64} = deltas_norm .* calibrations_cameraScale_µm_norm
-
+		deltas_µm = normedPixelsToMicrometres([ucm.targetx, ucm.targety])
 		new(deltas_µm[1], deltas_µm[2], ucm.dr)
-
 	end
 
-	function ComponentMotion(am::UncalibratedArbitraryMotion)
-		global calibrations_cameraScale_µm_norm, calibrations_downwardCameraDatum_norm
+	# function ComponentMotion(am::UncalibratedArbitraryMotion)
+	# 	global calibrations_cameraScale_µm_norm, calibrations_downwardCameraDatum_norm
 		
-		nominalTranslation_norm = float.(am.target) .- float.(calibrations_downwardCameraDatum_norm)
-		centreOfRotation_norm = float.(am.centreOfRotation) .- float.(calibrations_downwardCameraDatum_norm)
-		rotation_rad = am.rotation
+	# 	nominalTranslation_norm = float.(am.target) .- float.(calibrations_downwardCameraDatum_norm)
+	# 	centreOfRotation_norm = float.(am.centreOfRotation) .- float.(calibrations_downwardCameraDatum_norm)
+	# 	rotation_rad = am.rotation
 
-		rotate(p, θ) = [cos(θ) -sin(θ) ; sin(θ) cos(θ)] * p
-		centreOfRotationAfterRotationAboutDatum_norm = rotate(centreOfRotation_norm, rotation_rad)
-		correctiveTranslation_norm = centreOfRotation_norm .- centreOfRotationAfterRotationAboutDatum_norm
+	# 	rotate(p, θ) = [cos(θ) -sin(θ) ; sin(θ) cos(θ)] * p
+	# 	centreOfRotationAfterRotationAboutDatum_norm = rotate(centreOfRotation_norm, rotation_rad)
+	# 	correctiveTranslation_norm = centreOfRotation_norm .- centreOfRotationAfterRotationAboutDatum_norm
 
-		translation_norm = nominalTranslation_norm .+ correctiveTranslation_norm
+	# 	translation_norm = nominalTranslation_norm .+ correctiveTranslation_norm
 
-		deltas_µm = translation_norm .* calibrations_cameraScale_µm_norm
+	# 	deltas_µm = translation_norm .* calibrations_cameraScale_µm_norm
 
-		new(deltas_µm[1], deltas_µm[2], rotation_rad/2π)
+	# 	new(deltas_µm[1], deltas_µm[2], rotation_rad/2π)
 
-	end
+	# end
 
 end
 
@@ -96,13 +103,13 @@ struct UncalibratedComponentMotion
 
 end
 
-mutable struct UncalibratedArbitraryMotion
-	# stores information about a virtual centre of rotation
-	target::Vector{FI16}				# in normalised image units [-0.5, 0.5) 
-	rotation::Float64					#! in radians
-	centreOfRotation::Vector{FI16}		# in normalised image units
-	UncalibratedArbitraryMotion(; target::Vector{FI16}=[0.,0.], rotation=0., centreOfRotation::Vector{FI16}=[0.,0.]) = new(target, rotation, centreOfRotation)
-end
+# mutable struct UncalibratedArbitraryMotion
+# 	# stores information about a virtual centre of rotation
+# 	target::Vector{FI16}				# in normalised image units [-0.5, 0.5) 
+# 	rotation::Float64					#! in radians
+# 	centreOfRotation::Vector{FI16}		# in normalised image units
+# 	UncalibratedArbitraryMotion(; target::Vector{FI16}=[0.,0.], rotation=0., centreOfRotation::Vector{FI16}=[0.,0.]) = new(target, rotation, centreOfRotation)
+# end
 
 Movement = Union{StartupManoeuvres, HeadManoeuvres, UncalibratedComponentMotion, ComponentMotion, Nothing}
 
@@ -142,12 +149,12 @@ end
 # managed internally
 
 # state
-datumFromHomeX::Float64 = 0.		# gantry, limit switch homing
-datumFromHomeY::Float64 = 0.		# gantry, limit switch homing
+datumFromHomeX::Float64 = 0.		# µm; gantry, limit switch homing
+datumFromHomeY::Float64 = 0.		# µm; gantry, limit switch homing
 headFromUprightU::Float64 = 0.		# head, operator homed TODO think this through a bit more
 headFromRetractedV::Float64 = 0.	# head, limit switch homed
 headTouchoffV::Float64 = 0.			# SOFT LIMIT used to track the last touch-off
-headRotation::Float64 = 0.			# no real home; just need the current pos.
+headRotation::Fixed{Int64, 16} = 0.	# revolutions; no real home, just need the current pos.	# BUG (or a chance of one) — I changed this to Fixed without testing :)
 
 const head90degRotationU::Float64 = 5.5	# head, U axis movement corresponding to 90 degrees
 const headMaxExtensionV::Float64 = 1.8	# head, hard limit on head extension
@@ -195,7 +202,7 @@ function rawGantryMovement(; dx=0, dy=0)
 end
 
 function rawHeadMovement(; u=nothing, v=nothing, r=nothing, hduration=1)
-	global headIo
+	global headIo, headFromUprightU, headFromRetractedV, headRotation
 
 	gearRatio = 11 / 69.8 # TODO is this right
 
@@ -205,7 +212,12 @@ function rawHeadMovement(; u=nothing, v=nothing, r=nothing, hduration=1)
 	if !isnothing(r) headGcodeString *= " Z$r" end
 	headGcodeString *= " F$(60/hduration)\r"			# inverse time feed rate is specified in min⁻¹
 
-	write(headIo, headGcodeString)	
+	write(headIo, headGcodeString)
+
+	headFromUprightU = u
+	headFromRetractedV = v
+	headRotation = r
+
 	sleep(hduration)
 
 end

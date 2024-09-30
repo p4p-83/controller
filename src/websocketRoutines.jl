@@ -199,7 +199,7 @@ end
 
 function sendCentroidsToFrontend(socket)
 	
-	snapPositions = [pnp.v1.var"Message.Position"(r[1], r[2]) for r in Vision.getCentroidsRescaled(1)]
+	snapPositions = [pnp.v1.var"Message.Position"(reinterpret.(Int16, r)...) for r in Vision.getCentroids(1)]
 
 	sendMessageToFrontend(socket, pnp.v1.Message(
 		pnp.v1.var"Message.Tags".TARGET_POSITIONS,
@@ -222,16 +222,19 @@ interactiveStartupMode::Bool = false
 interactiveStartupModeLock::ReentrantLock = ReentrantLock()
 
 function enableDisableCentroidSending(enable::Bool)
+	global sendCentroidsDownSockets, sendCentroidsDownSocketsLock
 	@lock sendCentroidsDownSocketsLock sendCentroidsDownSockets = enable
 end
 
 function enableDisableInteractiveStartupMode(enable::Bool)
+	global interactiveStartupMode, interactiveStartupModeLock
 	@lock interactiveStartupModeLock interactiveStartupMode = enable
 end
 
 function handleWebSocketConnection(socket)
 	global sendCentroidsDownSockets, sendCentroidsDownSocketsLock
 	global interactiveStartupMode, interactiveStartupModeLock
+	global isSocketAlive, isSocketAliveLock
 	
 	isSocketAlive::Bool = true
 	isSocketAliveLock::ReentrantLock = ReentrantLock()

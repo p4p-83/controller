@@ -1,6 +1,8 @@
 module Controller
 
 using FixedPointNumbers, Base.Threads
+const j::ComplexF64 = im
+const °::Float64 = 2π/360	# multiplicative degrees to radians conversion factor
 FI16 = Fixed{Int16, 16}
 
 # header code

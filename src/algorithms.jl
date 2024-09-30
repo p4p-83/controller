@@ -3,7 +3,28 @@
 
 using Statistics # for `mean()`
 
-function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, selectivity=5)
+function getComplexCentroidsFromVision()::Vector{Vector{ComplexF64}}
+	leadsCam = 2
+	padsCam = 1
+
+
+	return [
+		[ ComplexF64(normedPixelsToMicrometres(c)...) for c in Vision.getCentroids(camera) ]
+		for camera in [leadsCam, padsCam]
+	]
+
+	# BUG probable issue: centroids at two edges of the frame will be wrapped around to the other side
+	# but this won't really affect the algoritms in their present state
+end
+
+function getComponentMotionFromArbitraryMotion(; nominalTranslation_µm::ComplexF64=0.0+0.0j, rotation_rad::Float64=0., centreOfRotation_µm::ComplexF64=0.0+0.0j)::ComponentMotion
+	correctiveTranslation_µm = centreOfRotation_µm * (1 - cis(rotation_rad))
+	dx_µm, dy_µm = reim.(nominalTranslation_µm + correctiveTranslation_µm)
+	rotation_revs = rotation_rad/2π
+	return ComponentMotion(dx=dx_µm, dy=dy_µm, dr=rotation_revs)
+end
+
+function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, selectivity=5)::ComponentMotion
 	# leads is a list of the lead centroids
 	# pads is a list of the pad centroids
 	
@@ -49,11 +70,11 @@ function findRotation(leads, pads ; referenceLeadIndex=1, resolution=3°, select
 	binOrdering = sortperm(bins, rev=true)
 	rankedAngles = binLabels[binOrdering]
 
-	return UncalibratedArbitraryMotion.(rotation=rankedAngles[1:5], centreOfRotation=[reim(reference)...])
+	return getComponentMotionFromArbitraryMotion(rotation_rad=rankedAngles[1], centreOfRotation_µm=reference)
 
 end
 
-function wick(leads, pads)
+function wick(leads, pads)::ComponentMotion
 
 	cvMotion = UncalibratedArbitraryMotion()
 
@@ -68,22 +89,17 @@ function wick(leads, pads)
 	#* STEP 1 — REMOVE NET TRANSLATION
 	# step 2 requires this gone first
 	movements = pads[mapping].-leads
-	meanMovement = mean(movements)
-	
-	pads .-= meanMovement
-	cvMotion.translation = [reim(meanMovement)...]
+	translation_µm = mean(movements)									#! this is a return value, don't further modify it
+	pads .-= translation_µm
 	
 	#* STEP 2 — REMOVE ROTATION
 	# no translational error on pads at present, so we can use them to calculate the centre of rotation
-	centreOfRotation = mean(pads[mapping])
+	centreOfRotation = mean(pads[mapping])								#! this is a return value, don't further modify it
 
 	# calculate rotational correction
 	subtendedAngles = angle.(pads[mapping].-centreOfRotation) .- angle.(leads.-centreOfRotation)
-	meanRotation = mean(subtendedAngles)
+	meanRotation = mean(subtendedAngles)								#! this is a return value, don't further modify it
 
-	cvMotion.rotation = meanRotation
-	cvMotion.centreOfRotation = [reim(centreOfRotation)...]
-
-	return cvMotion
+	return getComponentMotionFromArbitraryMotion(nominalTranslation_µm=translation_µm, rotation_rad=meanRotation, centreOfRotation_µm=centreOfRotation)
 	
 end
