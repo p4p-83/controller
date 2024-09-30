@@ -9,21 +9,18 @@
 # but then I didn't, 'cause that's kind of hard and I have little time left with this project
 
 using Base.Threads, LibSerialPort
-import PiGPIO							# TODO prompt the user to run `sudo pigpiod` before running this  
 
-const coneLimitPin::Int = 0				# TODO wiring
-const headHomePin::Int = 1		 		# TODO wiring
+# set switches up preemptively
+include("gpio.jl")
+const coneLimitPin::Int = 5				# TODO wiring
+const headHomePin::Int = 6		 		# TODO wiring
+setGpio(coneLimitPin, dir=INPUT, pull=PULL_DOWN)
+setGpio(headHomePin, dir=INPUT, pull=PULL_UP)
 
 # instances
-const piGpioInstance = PiGPIO.Pi()
 const gantryIo::LibSerialPort.SerialPort = open("/dev/ttyUSB0", 115200)
 const headIo::LibSerialPort.SerialPort = open("/dev/ttyACM0", 115200)
 
-# set switches up preemptively
-PiGPIO.set_mode(piGpioInstance, coneLimitPin, PiGPIO.INPUT)
-PiGPIO.set_mode(piGpioInstance, headHomePin, PiGPIO.INPUT)
-# PiGPIO.set_pull_up_down(piGpioInstance, coneLimitPin, PiGPIO.PUD_UP) # TODO review
-# PiGPIO.set_pull_up_down(piGpioInstance, headHomePin, PiGPIO.PUD_UP) # TODO review
 
 ###################
 # CALIBRATION FUNCTIONS
@@ -53,39 +50,6 @@ end
 	place
 end
 
-struct ComponentMotion
-	dx::Float64		# µm
-	dy::Float64		# µm
-	dr::Float64		#! in revolutions (i.e. 0.25 would represent 90°)
-
-	ComponentMotion(;dx=0, dy=0, dr=0) = new(dx, dy, dr)
-
-	function ComponentMotion(ucm::UncalibratedComponentMotion)
-		deltas_µm = normedPixelsToMicrometres([ucm.targetx, ucm.targety])
-		new(deltas_µm[1], deltas_µm[2], ucm.dr)
-	end
-
-	# function ComponentMotion(am::UncalibratedArbitraryMotion)
-	# 	global calibrations_cameraScale_µm_norm, calibrations_downwardCameraDatum_norm
-		
-	# 	nominalTranslation_norm = float.(am.target) .- float.(calibrations_downwardCameraDatum_norm)
-	# 	centreOfRotation_norm = float.(am.centreOfRotation) .- float.(calibrations_downwardCameraDatum_norm)
-	# 	rotation_rad = am.rotation
-
-	# 	rotate(p, θ) = [cos(θ) -sin(θ) ; sin(θ) cos(θ)] * p
-	# 	centreOfRotationAfterRotationAboutDatum_norm = rotate(centreOfRotation_norm, rotation_rad)
-	# 	correctiveTranslation_norm = centreOfRotation_norm .- centreOfRotationAfterRotationAboutDatum_norm
-
-	# 	translation_norm = nominalTranslation_norm .+ correctiveTranslation_norm
-
-	# 	deltas_µm = translation_norm .* calibrations_cameraScale_µm_norm
-
-	# 	new(deltas_µm[1], deltas_µm[2], rotation_rad/2π)
-
-	# end
-
-end
-
 struct UncalibratedComponentMotion
 
 	targetx::FI16	# normalised
@@ -103,13 +67,19 @@ struct UncalibratedComponentMotion
 
 end
 
-# mutable struct UncalibratedArbitraryMotion
-# 	# stores information about a virtual centre of rotation
-# 	target::Vector{FI16}				# in normalised image units [-0.5, 0.5) 
-# 	rotation::Float64					#! in radians
-# 	centreOfRotation::Vector{FI16}		# in normalised image units
-# 	UncalibratedArbitraryMotion(; target::Vector{FI16}=[0.,0.], rotation=0., centreOfRotation::Vector{FI16}=[0.,0.]) = new(target, rotation, centreOfRotation)
-# end
+struct ComponentMotion
+	dx::Float64		# µm
+	dy::Float64		# µm
+	dr::Float64		#! in revolutions (i.e. 0.25 would represent 90°)
+
+	ComponentMotion(;dx=0, dy=0, dr=0) = new(dx, dy, dr)
+
+	function ComponentMotion(ucm::UncalibratedComponentMotion)
+		deltas_µm = normedPixelsToMicrometres([ucm.targetx, ucm.targety])
+		new(deltas_µm[1], deltas_µm[2], ucm.dr)
+	end
+
+end
 
 Movement = Union{StartupManoeuvres, HeadManoeuvres, UncalibratedComponentMotion, ComponentMotion, Nothing}
 
@@ -236,7 +206,8 @@ function touchoffHead()
 
 		rawHeadMovement(v=v, hduration=stepTime)				# make a step
 		headTouchoffV = v										# save position as touch-off location in case we break	
-		if PiGPIO.read(piGpioInstance, coneLimitPin) break end	# stop if we've arrived
+		if !readGpio(coneLimitPin) break end						# stop if we've arrived
+			# TODO polarity
 
 	end
 
@@ -255,7 +226,7 @@ function executeHomeHead()
 	# bring the head V axis home
 	extensionPerStep = -0.1	# TODO must match mechanical homing tolerance range
 	stepTime = 0.1
-	while PiGPIO.read(piGpioInstance, headHomePin)
+	while readGpio(headHomePin)	# TODO assumes NC switch w/ pull up
 		rawHeadMovement(v=extensionPerStep, hduration=stepTime)
 	end
 
