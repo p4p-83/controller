@@ -18,7 +18,7 @@ setGpio(coneLimitPin, dir=INPUT, pull=PULL_DOWN)
 setGpio(headHomePin, dir=INPUT, pull=PULL_UP)
 
 # instances
-const gantryIo::LibSerialPort.SerialPort = open("/dev/ttyUSB0", 115200)
+const gantryIo::LibSerialPort.SerialPort = open("/dev/ttyUSB1", 115200)
 const headIo::LibSerialPort.SerialPort = open("/dev/ttyACM0", 115200)
 # const gantryIo = open("/dev/null", "w+")	#! so that Sam can test from home without crashing things
 # const headIo = open("/dev/null", "w+")
@@ -62,6 +62,10 @@ struct UncalibratedComponentMotion
 
 	# from rescaled types
 	UncalibratedComponentMotion(; targetx::Int16=Int16(0), targety::Int16=Int16(0), dr=0.) = new(reinterpret(FI16, targetx), reinterpret(FI16, targety), dr)
+
+	# from James's janky rescaled types
+	# `inexact error` would mean an overflow
+	UncalibratedComponentMotion(; targetx::Int32=Int32(0), targety::Int32=Int32(0), dr=0.) = new(reinterpret(FI16, Int16(targetx)), reinterpret(FI16, Int16(targety)), dr)
 	
 	# # from all other types
 	# UncalibratedComponentMotion(; targetx=0., targety=0., dr=0.) = new(targetx, targety, dr)
@@ -105,10 +109,22 @@ function setMovement(m::Movement)
 end
 
 function setHeadHoldingTorque(state::Bool)
-	@info "$(state ? "enabling" : "disabling") head holding torque"
 	global headIo
-	write(headIo, "\$1=$(state ? "255" : "254")\r")
-	rawHeadMovement(r=0, hduration=0.1)
+	@info "$(state ? "enabling" : "disabling") head holding torque"
+	write(headIo, "\$1=$(state ? "255" : "1")\r")
+	rawHeadMovement(r=(state ? 0.1 : 0.2), hduration=0.1)
+
+	if state
+		@info "enabling head holding torque"
+		write(headIo, "\$1=255\r")
+		sleep(0.1)	# sleep is critical
+		rawHeadMovement(r=0.2, hduration=0.4)
+	else
+		@info "disabling head holding torque"
+		write(headIo, "\$1=10\r")
+		sleep(0.1)
+		rawHeadMovement(r=-0.2, hduration=0.4)
+	end
 end
 
 function setVacuum(s::VacuumStates)
@@ -129,7 +145,7 @@ headTouchoffV::Float64 = 0.			# SOFT LIMIT used to track the last touch-off
 headRotation::Fixed{Int64, 16} = 0.	# revolutions; no real home, just need the current pos.	# BUG (or a chance of one) — I changed this to Fixed without testing :)
 
 const head90degRotationU::Float64 = 5.5	# head, U axis movement corresponding to 90 degrees
-const headMaxExtensionV::Float64 = 1.8	# head, hard limit on head extension
+const headMaxExtensionV::Float64 = -1.8	# head, hard limit on head extension
 
 function rawGantryMovement(; dx=0, dy=0)
 	global datumFromHomeX, datumFromHomeY, gantryIo
@@ -178,6 +194,8 @@ end
 function rawHeadMovement(; u=nothing, v=nothing, r=nothing, hduration=1)
 	global headIo, headFromUprightU, headFromRetractedV, headRotation
 
+	@info "rawHeadMovement u=$u v=$v r=$r hduration=$hduration"
+
 	gearRatio = 11 / 69.8 							# TODO is this right?
 
 	headGcodeString =  "G1"
@@ -188,13 +206,13 @@ function rawHeadMovement(; u=nothing, v=nothing, r=nothing, hduration=1)
 	if !isnothing(u)
 		headGcodeString *= " X$u"
 		headFromUprightU = u
-		targetV -= gearRatio*headFromUprightU		# parasitic component of u in v axis # TODO is gear ratio adjustment in the right direction?
+		targetV += gearRatio*headFromUprightU		# parasitic component of u in v axis # TODO is gear ratio adjustment in the right direction?
 	end
 
 	headGcodeString *= " Y$targetV"
 
 	if !isnothing(r)
-		headGcodeString *= " Z$r"
+		headGcodeString *= " Z$(float(r))"
 		headRotation = r
 	end
 
@@ -213,7 +231,7 @@ end
 function touchoffHead()
 	global headFromRetractedV, headTouchoffV, piGpioInstance
 
-	extensionPerStep = 0.1
+	extensionPerStep = -0.1
 	stepTime = 0.1 			# seconds
 
 	for v in range(headFromRetractedV, headMaxExtensionV, step=extensionPerStep)
@@ -238,10 +256,10 @@ function executeHomeHead()
 	# assume U has been homed optically by the operator
 
 	# bring the head V axis home
-	extensionPerStep = -0.1	# TODO must match mechanical homing tolerance range
+	extensionPerStep = 0.1	# TODO must match mechanical homing tolerance range
 	stepTime = 0.1
 
-	for _ in 1:(3÷abs(extensionPerStep))
+	for _ in 1:(1.8÷abs(extensionPerStep))
 		# cap the travel
 		if !readGpio(headHomePin) break end # TODO assumes NC switch w/ pull up
 		rawHeadMovement(v=extensionPerStep, hduration=stepTime)
@@ -290,14 +308,14 @@ function executeMovement(m::HeadManoeuvres)
 
 	if m == lower
 		rawHeadMovement(v=0, hduration=1)					# retract
-		setCompositingMode(CompositingModes.FROZEN)
+		setCompositingMode(Vision.CompositingModes.FROZEN)
 		rawHeadMovement(u=0, hduration=1)					# point downwards
 		touchoffHead()										# extend until contact with component
 	
 	elseif m == raise
 		rawHeadMovement(v=0, hduration=1)					# retract (lift)
 		rawHeadMovement(u=head90degRotationU, hduration=1) 	# lift back up
-		setCompositingMode(CompositingModes.NORMAL)
+		setCompositingMode(Vision.CompositingModes.NORMAL)
 		rawHeadMovement(v=headTouchoffV, hduration=1) 		# re-extend symmetrically to put into plane of focus
 	
 	elseif m == pick
@@ -330,12 +348,11 @@ function executeMovement(m::ComponentMotion)
 
 	tasks = [
 		@task rawGantryMovement(dx=m.dx, dy=m.dy)
-		@task rawHeadMovement(r=(headRotation += m.dr), hduration=(0.5*dr))	# TODO revise duration (feed rate) calculation
-		# TODO I probably should prevent wind-up on headRotation…
+		@task rawHeadMovement(r=(headRotation += m.dr), hduration=(clamp(0.5*abs(m.dr), 0.1, 1)))	# TODO revise duration (feed rate) calculation
 	]
 
-	@info "waiting"
 	schedule.(tasks)
+	@info "waiting"
 	wait.(tasks)
 	@info "done waiting"
 

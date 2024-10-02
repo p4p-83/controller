@@ -6,7 +6,8 @@ using HTTP.WebSockets, ProtoBuf
 function sendMessageToFrontend(socket::WebSocket, message::pnp.v1.Message)
 	encoder = ProtoEncoder(IOBuffer())
 	encode(encoder, message)
-	if position(encoder.io) != 0
+	data = encoder.io
+	if position(data) != 0
 		buffer = take!(data)
 		WebSockets.send(socket, buffer)
 	end
@@ -113,9 +114,11 @@ end
 function handleWsNozzleRotationRequest(payload)
 
 	if payload.name !== :nozzleRotation
-		println("Missing nozzle rotation!", payload)
+		@warn "Missing nozzle rotation! $payload"
 		return
 	end
+
+	@info "attempting rotation $(-payload[].degrees)°"
 
 	executeMovement(ComponentMotion(
 		dr=(-payload[].degrees/360)
@@ -141,7 +144,7 @@ end
 # PUBLIC-PRIVATE DELEGATION
 
 function handleFrontEndCommand(socket::WebSocket, data::Any)
-	println("Non-UInt8[] data received: ", data)
+	@warn "Non-UInt8[] data received: $data"
 end
 
 function handleFrontEndCommand(socket::WebSocket, data::AbstractArray{UInt8})
@@ -152,8 +155,10 @@ function handleFrontEndCommand(socket::WebSocket, data::AbstractArray{UInt8})
 	if isnothing(message) return end
 
 	Tags = pnp.v1.var"Message.Tags"
-	tag::Tags = message.tag
+	tag::Tags.T = message.tag
 	payload = message.payload
+
+	@info "Handling front-end command ($tag) with default handler"
 
 	if tag == Tags.HEARTBEAT 				handleWsHeartbeat(socket)
 	elseif tag == Tags.CALIBRATE_DELTAS		handleWsCalibrateDeltas(payload)
@@ -225,6 +230,8 @@ frontendCommandHandlerLock::ReentrantLock = ReentrantLock()
 # useful for interactive startup
 # call with (nothing) to reset / restore default
 function overrideFrontendCommandHandler(overrideFn::Union{Function, Nothing})
+	global frontendCommandHandler, frontendCommandHandlerLock
+	@info "setting FECH override ($overrideFn)"
 	lock(frontendCommandHandlerLock)
 	
 	if isnothing(overrideFn) frontendCommandHandler = handleFrontEndCommand
@@ -255,8 +262,9 @@ function handleWebSocketConnection(socket)
 	
 	# keeps iterating until socket closes
 	for data in socket
-		fech = @lock frontendCommandHandlerLock frontendCommandHandler
-		fech(socket, data)
+		# fech = @lock frontendCommandHandlerLock frontendCommandHandler
+		# fech(socket, data)
+		@lock frontendCommandHandlerLock frontendCommandHandler(socket, data)
 	end
 
 	# kill the process — socket closed
