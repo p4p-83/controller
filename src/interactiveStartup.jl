@@ -114,7 +114,7 @@ function interactiveStartup()
 
 	setHeadHoldingTorque(true)
 	touchoffHead()
-	rawHeadMovement(v=headTouchoffV+0.05)
+	rawHeadMovement(v=headTouchoffV+0.08)
 
 	#* --> align over reference mark
 

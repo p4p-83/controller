@@ -175,9 +175,19 @@ function rawGantryMovement(; dx=0, dy=0)
 
 	# cannot leave bounds if already in bounds
 	# if isCurrentlyInBounds
-		# clamp!(nextDatumFromHomeX, gantryBoundsMinX, gantryBoundsMaxX)
-		# clamp!(nextDatumFromHomeY, gantryBoundsMinY, gantryBoundsMaxY)
+	# 	clamp!(nextDatumFromHomeX, gantryBoundsMinX, gantryBoundsMaxX)
+	# 	clamp!(nextDatumFromHomeY, gantryBoundsMinY, gantryBoundsMaxY)
 	# end
+
+	# x bounds check
+	if (nextDatumFromHomeX < 0) nextDatumFromHomeX = 0. end
+	if (nextDatumFromHomeX > 265e3) nextDatumFromHomeX = 265e3 end
+
+	# y bounds check
+	if (nextDatumFromHomeY < 0) nextDatumFromHomeY = 0. end
+	if (nextDatumFromHomeY > 180e3) nextDatumFromHomeY = 180e3 end
+	if ((datumFromHomeY > 55e3) && (nextDatumFromHomeY < 55e3)) nextDatumFromHomeY = 55e3 end
+
 
 	dxAchieved = nextDatumFromHomeX - datumFromHomeX
 	dyAchieved = nextDatumFromHomeY - datumFromHomeY
