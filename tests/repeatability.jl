@@ -3,73 +3,62 @@ using Images, Dates
 
 ##
 
+function cap(shutter)
+    img = capture(shutter)
+    save("/media/james/STRONTIUM/Repeatability/4.png", img)
+end
+
 function capture(shutter=12e-3)
-    w = 4056
-    h = 3040
+    w = 4608
+    h = 2592
     channels = 3 # RGB
-    raw = read(`libcamera-still --nopreview --shutter=$(shutter)s --denoise=cdn_fast --immediate --encoding=rgb --output=-`)
+    raw = read(`libcamera-still --camera 0 --lens-position 8.4 --nopreview --shutter=$(shutter)s --denoise=cdn_fast --immediate --encoding=rgb --output=-`)
     mat = permutedims(reshape(raw, channels, w, h), (1, 3, 2))
     colorview(RGB{N0f8}, mat)
 end
 
 ##
 
-# run(`echo "a" > /dev/tty.usbserial-10`)
-f = open("/dev/ttyUSB1", 115200)
+gantry = open("/dev/ttyUSB0", 115200)
+
+##
+write(gantry, "G28\n")
 
 ##
 
-write(f, "G28\n")
-
-##
-
-# positions = 10000 .* [
-#     10 10 0
-#     12.5 10 0
-#     15 12.5 0
-#     15 15 0
-#     12.5 17.5 0
-#     10 17.5 0
-#     7.5 15 0
-#     7.5 12.5 0
-# ]
 positions = [
-    14.3 11.4 0
-    15.7 11.5 0
-    16.4 10.2 0
-    16.2 13 0
-    16 15.8 0
-    17.6 20.9 0
-    13.2 23 0
-    13.2 21.9 0
-    12.1 14 0
+    10.0 5.2 0
+    2.6 3.4 0
+    12.0 6.6 0
+    12.0 18.7 0
+    11.0 16.3 0
+    10.5 16.3 0
+    2.0 16.3 0
+    22.0 10.0 0
+    22.0 18.0 0
 ] .* 10000
 positions = Int.(positions)
 
-write(f, "G0 X$(positions[1,1]) Y$(positions[1,2]) Z$(positions[1,3])\n");
+write(gantry, "G0 X$(positions[1,1]) Y$(positions[1,2]) Z$(positions[1,3])\n");
 sleep(5)
+cap(1/10)
 
 ##
 
-coldstarts = 5
-spins = 30
+spins = 500 
 
-for j = 1:coldstarts
-    for i = 1:spins
-        for k = 1:size(positions)[1]
-            coord = positions[k, :]
-            @time write(f, "G0 X$(coord[1]) Y$(coord[2]) Z$(coord[3])\n")
-            sleep(6)
-            @time img = capture(1 / 3)
-            save("/media/james/STRONTIUM/Repeatability/$j-$i-$k.png", img)
-            open("/media/james/STRONTIUM/Repeatability/testing_log.txt", "a") do logfile
-                println(logfile, "$(Dates.format(now(), "d u yy HH:MM:SS")): captured with j=$j, i=$i, and k=$k")
-                println(logfile, "G0 X$(coord[1]) Y$(coord[2]) Z$(coord[3])\n")
-            end
+for i = 1:spins
+    for k = 1:size(positions)[1]
+        coord = positions[k, :]
+        @time write(gantry, "G0 X$(coord[1]) Y$(coord[2]) Z$(coord[3])\n")
+        sleep(10)
+        @time img = capture(1 / 10)
+        save("/media/james/STRONTIUM/Repeatability/$i-$k.png", img)
+        open("/media/james/STRONTIUM/Repeatability/testing_log.txt", "a") do logfile
+            println(logfile, "$(Dates.format(now(), "d u yy HH:MM:SS")): captured with i=$i, and k=$k")
+            println(logfile, "G0 X$(coord[1]) Y$(coord[2]) Z$(coord[3])\n")
         end
     end
-    write(f, "G28\n")
-    sleep(10)
 end
 
 ##
@@ -78,4 +67,4 @@ end
 
 ##
 
-close(f)
+close(gantry)

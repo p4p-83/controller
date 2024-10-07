@@ -63,6 +63,8 @@ end
 function interactiveStartup()
 	global upwardCameraDatumLock, upwardCameraDatum
 	global downwardCameraDatumLock, downwardCameraDatum
+	global calibrations_downwardCameraDatum_norm, calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm
+	global headTouchoffV # TODO should not be here but is… hacky last-minute things
 
 	#* --> preparation
 
@@ -111,6 +113,8 @@ function interactiveStartup()
 	readline()
 
 	setHeadHoldingTorque(true)
+	touchoffHead()
+	rawHeadMovement(v=headTouchoffV+0.05)
 
 	#* --> align over reference mark
 
@@ -210,6 +214,7 @@ function interactiveStartup()
 	calibrations_downwardCameraDatum_norm .= downwardCameraDatum
 	calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm .= upwardCameraDatum .- downwardCameraDatum
 	Vision.setCompositingOffsets(calibrations_upwardCameraDatumWrtDownwardCameraDatum_norm)
+	Vision.setNozzleOffsets(calibrations_downwardCameraDatum_norm)
 
 	println("""
 	Ready to go.

@@ -12,13 +12,19 @@ using Base.Threads, LibSerialPort
 
 # set switches up preemptively
 include("gpio.jl")
-const coneLimitPin::Int = 5				# TODO wiring
-const headHomePin::Int = 6		 		# TODO wiring
+const coneLimitPin::Int = 27
+const headHomePin::Int = 17
 setGpio(coneLimitPin, dir=INPUT, pull=PULL_DOWN)
-setGpio(headHomePin, dir=INPUT, pull=PULL_UP)
+setGpio(headHomePin, dir=INPUT, pull=PULL_DOWN)
+
+const CONE_LIMIT_NOT_DEPRESSED = true
+const CONE_LIMIT_DEPRESSED = false
+
+const V_HOMING_NOT_DEPRESSED = true
+const V_HOMING_DEPRESSED = false
 
 # instances
-const gantryIo::LibSerialPort.SerialPort = open("/dev/ttyUSB1", 115200)
+const gantryIo::LibSerialPort.SerialPort = open("/dev/ttyUSB0", 115200)
 const headIo::LibSerialPort.SerialPort = open("/dev/ttyACM0", 115200)
 # const gantryIo = open("/dev/null", "w+")	#! so that Sam can test from home without crashing things
 # const headIo = open("/dev/null", "w+")
@@ -145,7 +151,7 @@ headTouchoffV::Float64 = 0.			# SOFT LIMIT used to track the last touch-off
 headRotation::Fixed{Int64, 16} = 0.	# revolutions; no real home, just need the current pos.	# BUG (or a chance of one) — I changed this to Fixed without testing :)
 
 const head90degRotationU::Float64 = 5.5	# head, U axis movement corresponding to 90 degrees
-const headMaxExtensionV::Float64 = -1.8	# head, hard limit on head extension
+const headMaxExtensionV::Float64 = -1.9	# head, hard limit on head extension
 
 function rawGantryMovement(; dx=0, dy=0)
 	global datumFromHomeX, datumFromHomeY, gantryIo
@@ -154,24 +160,24 @@ function rawGantryMovement(; dx=0, dy=0)
 	
 	# TODO measure and set these
 	# mostly here to prevent head crashes, but they also prevent a certain spastic bug in the gantry controller from manifesting
-	gantryBoundsMinX = 100
-	gantryBoundsMaxX = 300
-	gantryBoundsMinY = 100
-	gantryBoundsMaxY = 300
+	# gantryBoundsMinX = 100
+	# gantryBoundsMaxX = 300
+	# gantryBoundsMinY = 100
+	# gantryBoundsMaxY = 300
 
-	isInBounds(x, y) = (gantryBoundsMinX <= x <= gantryBoundsMaxX) &&
-	                   (gantryBoundsMinY <= y <= gantryBoundsMaxY)
-	isCurrentlyInBounds = isInBounds(datumFromHomeX, datumFromHomeY)
+	# isInBounds(x, y) = (gantryBoundsMinX <= x <= gantryBoundsMaxX) &&
+	                #    (gantryBoundsMinY <= y <= gantryBoundsMaxY)
+	# isCurrentlyInBounds = isInBounds(datumFromHomeX, datumFromHomeY)
 
 	# next positions
-	nextDatumFromHomeX = datumFromHomeX + dx
-	nextDatumFromHomeY = datumFromHomeY + dy
+	nextDatumFromHomeX = datumFromHomeX + float.(dx)
+	nextDatumFromHomeY = datumFromHomeY + float.(dy)
 
 	# cannot leave bounds if already in bounds
-	if isCurrentlyInBounds
-		clamp!(nextDatumFromHomeX, gantryBoundsMinX, gantryBoundsMaxX)
-		clamp!(nextDatumFromHomeY, gantryBoundsMinY, gantryBoundsMaxY)
-	end
+	# if isCurrentlyInBounds
+		# clamp!(nextDatumFromHomeX, gantryBoundsMinX, gantryBoundsMaxX)
+		# clamp!(nextDatumFromHomeY, gantryBoundsMinY, gantryBoundsMaxY)
+	# end
 
 	dxAchieved = nextDatumFromHomeX - datumFromHomeX
 	dyAchieved = nextDatumFromHomeY - datumFromHomeY
@@ -196,19 +202,21 @@ function rawHeadMovement(; u=nothing, v=nothing, r=nothing, hduration=1)
 
 	@info "rawHeadMovement u=$u v=$v r=$r hduration=$hduration"
 
-	gearRatio = 11 / 69.8 							# TODO is this right?
+	# gearRatio = 11 / 69.8 							# TODO is this right?
+	gearRatio = 0.15		 							# TODO is this right?
 
 	headGcodeString =  "G1"
-
-	targetV = !isnothing(v) ? v : headFromRetractedV
-	headFromRetractedV = targetV
 
 	if !isnothing(u)
 		headGcodeString *= " X$u"
 		headFromUprightU = u
-		targetV += gearRatio*headFromUprightU		# parasitic component of u in v axis # TODO is gear ratio adjustment in the right direction?
 	end
 
+	if !isnothing(v)
+		headFromRetractedV = v
+	end
+
+	targetV = headFromRetractedV + gearRatio*headFromUprightU
 	headGcodeString *= " Y$targetV"
 
 	if !isnothing(r)
@@ -231,15 +239,15 @@ end
 function touchoffHead()
 	global headFromRetractedV, headTouchoffV, piGpioInstance
 
-	extensionPerStep = -0.1
+	extensionPerStep = -0.05
 	stepTime = 0.1 			# seconds
 
 	for v in range(headFromRetractedV, headMaxExtensionV, step=extensionPerStep)
 
 		rawHeadMovement(v=v, hduration=stepTime)				# make a step
 		headTouchoffV = v										# save position as touch-off location in case we break	
-		if readGpio(coneLimitPin) break end						# stop if we've arrived
-			# TODO polarity
+		sleep(0.05)
+		if readGpio(coneLimitPin) == CONE_LIMIT_DEPRESSED break end						# stop if we've arrived
 
 	end
 
@@ -256,12 +264,13 @@ function executeHomeHead()
 	# assume U has been homed optically by the operator
 
 	# bring the head V axis home
-	extensionPerStep = 0.1	# TODO must match mechanical homing tolerance range
+	extensionPerStep = 0.05	# TODO must match mechanical homing tolerance range
 	stepTime = 0.1
 
-	for _ in 1:(1.8÷abs(extensionPerStep))
-		# cap the travel
-		if !readGpio(headHomePin) break end # TODO assumes NC switch w/ pull up
+	for _ in 1:(2÷abs(extensionPerStep))
+		# limit the travel
+		sleep(0.05)
+		if readGpio(headHomePin) == V_HOMING_DEPRESSED break end # TODO assumes NC switch w/ pull up
 		rawHeadMovement(v=extensionPerStep, hduration=stepTime)
 	end
 
@@ -322,12 +331,14 @@ function executeMovement(m::HeadManoeuvres)
 		# re-use the above
 		executeMovement(lower)
 		setVacuum(suck)
+		sleep(0.5)
 		executeMovement(raise)
 	
 	elseif m == place
 		# re-use the above
 		executeMovement(lower)
 		setVacuum(nosuck)
+		sleep(0.5)
 		executeMovement(raise)
 
 	else

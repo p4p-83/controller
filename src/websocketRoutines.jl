@@ -60,6 +60,7 @@ function handleWsGantryMovementRequest(socket, payload)
 	# println("Gantry currently at $(gantry.position)")
 	# println("Calibration is currently $(calibration)")
 
+	@info "handleWsGantryMovementRequest $(payload[].x) $(payload[].y)"
 	executeMovement(UncalibratedComponentMotion(targetx=payload[].x, targety=payload[].y))
 
 	# acknowledge movement
