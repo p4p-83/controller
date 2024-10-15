@@ -322,7 +322,7 @@ function executeMovement(m::StartupManoeuvres)
 	end
 end
 
-function executeMovement(m::HeadManoeuvres)
+function executeMovement(m::HeadManoeuvres, updateMachineState)
 	global headTouchoffV
 
 	if m == lower
@@ -339,17 +339,23 @@ function executeMovement(m::HeadManoeuvres)
 	
 	elseif m == pick
 		# re-use the above
-		executeMovement(lower)
+		executeMovement(lower, updateMachineState)
+		updateMachineState(true, false, false)
 		setVacuum(suck)
+		updateMachineState(true, true, true)
 		sleep(0.5)
-		executeMovement(raise)
+		executeMovement(raise, updateMachineState)
+		updateMachineState(false, true, true)
 	
 	elseif m == place
 		# re-use the above
-		executeMovement(lower)
+		executeMovement(lower, updateMachineState)
+		updateMachineState(true, true, true)
 		setVacuum(nosuck)
+        updateMachineState(true, false, false)
 		sleep(0.5)
-		executeMovement(raise)
+		executeMovement(raise, updateMachineState)
+        updateMachineState(false, false, false)
 
 	else
 		@error "Unimplemented"

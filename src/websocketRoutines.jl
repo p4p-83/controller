@@ -75,7 +75,7 @@ function handleWsGantryMovementRequest(socket, payload)
 end
 
 # OPERATE_HEAD
-function handleWsHeadMovementRequest(payload)
+function handleWsHeadMovementRequest(socket, payload)
 	
 	if payload.name !== :headOperation
 		println("Missing head operation!", payload)
@@ -83,14 +83,29 @@ function handleWsHeadMovementRequest(payload)
 	end
 
 	operation = payload[].operation
+	
+	function updateMachineState(isHeadDown, isVacuumEngaged, isComponentPicked)
+		sendMessageToFrontend(socket, pnp.v1.Message(
+            pnp.v1.var"Message.Tags".MACHINE_STATE,
+            OneOf(
+                :machineState,
+                pnp.v1.var"Message.MachineState"(
+					pnp.v1.var"Message.Position"(0, 0), 
+					isHeadDown,
+					isVacuumEngaged,
+					isComponentPicked,
+				)
+            )
+        ))
+	end
 
 	# support for normal operations
 	if operation == pnp.v1.var"Message.HeadOperation.Operation".PICK
-		executeMovement(pick)
+		executeMovement(pick, updateMachineState)
 	
 	elseif operation == pnp.v1.var"Message.HeadOperation.Operation".PLACE
-		executeMovement(place)
-
+		executeMovement(place, updateMachineState)
+		
 	# support for manual overrides
 	elseif operation == pnp.v1.var"Message.HeadOperation.Operation".ENGAGE_VACUUM
 		setVacuum(suck)
@@ -99,10 +114,10 @@ function handleWsHeadMovementRequest(payload)
 		setVacuum(nosuck)
 	
 	elseif operation == pnp.v1.var"Message.HeadOperation.Operation".LOWER_HEAD
-		executeMovement(lower)
+		executeMovement(lower, updateMachineState)
 	
 	elseif operation == pnp.v1.var"Message.HeadOperation.Operation".RAISE_HEAD
-		executeMovement(raise)
+		executeMovement(raise, updateMachineState)
 
 	else
 		@error "Unimplemented"
@@ -164,7 +179,7 @@ function handleFrontEndCommand(socket::WebSocket, data::AbstractArray{UInt8})
 	if tag == Tags.HEARTBEAT 				handleWsHeartbeat(socket)
 	elseif tag == Tags.CALIBRATE_DELTAS		handleWsCalibrateDeltas(payload)
 	elseif tag == Tags.TARGET_DELTAS 		handleWsGantryMovementRequest(socket, payload)
-	elseif tag == Tags.OPERATE_HEAD			handleWsHeadMovementRequest(payload)
+	elseif tag == Tags.OPERATE_HEAD			handleWsHeadMovementRequest(socket, payload)
 	elseif tag == Tags.ROTATE_NOZZLE		handleWsNozzleRotationRequest(payload)
 	elseif tag == Tags.STEP_GANTRY			handleWsHomingRequest(payload)
 	else 									@error "Unimplemented"
