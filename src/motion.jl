@@ -339,8 +339,8 @@ function executeMovement(m::HeadManoeuvres, updateMachineState)
 	
 	elseif m == pick
 		# re-use the above
-		executeMovement(lower, updateMachineState)
 		updateMachineState(true, false, false)
+		executeMovement(lower, updateMachineState)
 		setVacuum(suck)
 		updateMachineState(true, true, true)
 		sleep(0.5)
@@ -349,8 +349,8 @@ function executeMovement(m::HeadManoeuvres, updateMachineState)
 	
 	elseif m == place
 		# re-use the above
-		executeMovement(lower, updateMachineState)
 		updateMachineState(true, true, true)
+		executeMovement(lower, updateMachineState)
 		setVacuum(nosuck)
         updateMachineState(true, false, false)
 		sleep(0.5)
